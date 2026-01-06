@@ -5,6 +5,7 @@ import random
 import tkinter as tk
 from tkinter import ttk
 import threading
+from datetime import datetime
 
 # 定义常量
 MARKET_MAP = {
@@ -27,26 +28,43 @@ class BigTradeAnalyzer:
     
     def load_data(self, progress_callback=None):
         """加载随机500只股票数据"""
+        if not os.path.exists(self.data_dir):
+            if progress_callback:
+                progress_callback(f"错误: 目录 {self.data_dir} 不存在")
+            return
+
         csv_files = glob.glob(os.path.join(self.data_dir, '*.csv'))
         total_files = len(csv_files)
         
+        if total_files == 0:
+            if progress_callback:
+                progress_callback(f"错误: 在 {self.data_dir} 中未找到 CSV 文件")
+            return
+
         # 随机选择500只股票
         sample_size = min(500, total_files)
         selected_files = random.sample(csv_files, sample_size)
         
         if progress_callback:
-            progress_callback(f"共发现 {total_files} 只股票数据")
-            progress_callback(f"随机选择 {sample_size} 只股票进行分析")
+            progress_callback(f"🔍 共发现 {total_files} 只股票数据")
+            progress_callback(f"🎲 随机选择 {sample_size} 只股票进行分析")
         
+        # 清空旧数据
+        self.stock_data = {}
+        for market in self.market_data:
+            self.market_data[market] = {}
+
         for i, file_path in enumerate(selected_files):
             # 显示进度
             progress = (i + 1) / sample_size * 100
             if progress_callback:
-                progress_callback(f"加载进度: {progress:.1f}% ({i+1}/{sample_size})")
+                progress_callback(f"⏳ 加载进度: {progress:.1f}% ({i+1}/{sample_size})")
             
             # 从文件名提取股票代码
             filename = os.path.basename(file_path)
-            stock_code = filename.split('_')[-1].split('.')[0]
+            # 假设文件名格式包含股票代码，如 deal_600000.csv
+            parts = filename.replace('.csv', '').split('_')
+            stock_code = parts[-1]
             
             try:
                 # 读取CSV文件
@@ -55,6 +73,9 @@ class BigTradeAnalyzer:
                 # 清理列名（去除首尾空格和特殊字符）
                 df.columns = df.columns.str.strip()
                 
+                if 'Volume' not in df.columns or 'Side' not in df.columns:
+                    continue
+
                 # 转换Volume为手数（1手=100股）
                 df['Volume_Hand'] = df['Volume'] / 100
                 
@@ -62,24 +83,22 @@ class BigTradeAnalyzer:
                 self.stock_data[stock_code] = df
                 
                 # 分类到不同市场
-                # 沪市：6开头
-                # 深市：0开头（不含创业板）
-                # 创业板：3开头
                 if stock_code.startswith('6'):
                     self.market_data['沪市'][stock_code] = df
                 elif stock_code.startswith('3'):
                     self.market_data['创业板'][stock_code] = df
                 elif stock_code.startswith('0'):
                     self.market_data['深市'][stock_code] = df
+                
                 # 所有股票都添加到"全部股票"中
                 self.market_data['全部股票'][stock_code] = df
                 
             except Exception as e:
                 if progress_callback:
-                    progress_callback(f"处理文件 {file_path} 时出错: {e}")
+                    progress_callback(f"⚠️ 处理 {stock_code} 时出错: {e}")
         
         if progress_callback:
-            progress_callback("数据加载完成！")
+            progress_callback("✅ 数据加载完成！")
         self.is_loaded = True
     
     def analyze_big_trades(self, buy_threshold, sell_threshold):
@@ -90,9 +109,9 @@ class BigTradeAnalyzer:
             market_results = []
             
             for stock_code, df in stocks.items():
-                # 统计大买单（Side=1 或其他表示主动买的标识）
-                # 根据数据观察，Side=1 是主动买，Side=-1/-11 是主动卖
+                # 统计大买单（Side=1 是主动买）
                 big_buys = df[(df['Side'] == 1) & (df['Volume_Hand'] >= buy_threshold)]
+                # 统计大卖单（Side=-1 或 -11 是主动卖）
                 big_sells = df[(df['Side'].isin([-1, -11])) & (df['Volume_Hand'] >= sell_threshold)]
                 
                 # 计算总成交手数
@@ -126,190 +145,413 @@ class BigTradeAnalyzer:
 class BigTradeUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("A股大买卖单分析系统")
-        self.root.geometry("1200x800")
+        self.root.title("A股大买卖单分析系统 v2.0")
+        self.root.geometry("1300x850")
+        
+        # 默认模式为深色
+        self.dark_mode = True
+        
+        # 颜色方案
+        self.colors = {
+            'dark': {
+                'bg': '#1e1e1e',
+                'fg': '#e0e0e0',
+                'header_bg': '#2d2d2d',
+                'accent': '#007acc',
+                'accent_hover': '#005a9e',
+                'row_alt': '#252526',
+                'border': '#333333',
+                'input_bg': '#3c3c3c',
+                'status_blue': '#4fc3f7',
+                'status_green': '#81c784',
+                'status_red': '#e57373'
+            },
+            'light': {
+                'bg': '#ffffff',
+                'fg': '#333333',
+                'header_bg': '#f3f3f3',
+                'accent': '#0066cc',
+                'accent_hover': '#0052a3',
+                'row_alt': '#fafafa',
+                'border': '#cccccc',
+                'input_bg': '#ffffff',
+                'status_blue': '#0066cc',
+                'status_green': '#2e7d32',
+                'status_red': '#c62828'
+            }
+        }
         
         # 初始化分析器
         self.analyzer = BigTradeAnalyzer('deal_20251231')
         
+        # 应用样式
+        self.style = ttk.Style()
+        self.apply_styles()
+        
         # 创建UI组件
         self.create_widgets()
-    
+        
+        # 初始刷新样式
+        self.update_theme_colors()
+
+    def apply_styles(self):
+        """配置通用样式"""
+        # 使用 clam 主题以获得更好的跨平台颜色自定义支持
+        try:
+            self.style.theme_use('clam')
+        except:
+            pass
+            
+        font_main = ("Microsoft YaHei", 10)
+        font_bold = ("Microsoft YaHei", 10, "bold")
+        font_header = ("Microsoft YaHei", 11, "bold")
+        
+        self.root.option_add("*Font", font_main)
+        
+        # Treeview 样式基础配置
+        self.style.configure("Treeview", font=font_main, rowheight=30)
+        self.style.configure("Treeview.Heading", font=font_header)
+        
+        # Notebook 样式
+        self.style.configure("TNotebook", padding=2)
+        self.style.configure("TNotebook.Tab", padding=[20, 5], font=font_bold)
+        
+        # 标签框架样式
+        self.style.configure("TLabelframe", padding=10)
+        self.style.configure("TLabelframe.Label", font=font_bold)
+
+    def update_theme_colors(self):
+        """根据当前模式更新所有颜色"""
+        theme = 'dark' if self.dark_mode else 'light'
+        c = self.colors[theme]
+        
+        # 更新根窗口
+        self.root.configure(bg=c['bg'])
+        
+        # 通用组件样式配置
+        styles = {
+            "TFrame": {"background": c['bg']},
+            "TLabelframe": {"background": c['bg'], "foreground": c['border']}, # 边框颜色
+            "TLabelframe.Label": {"background": c['bg'], "foreground": c['accent']},
+            "TLabel": {"background": c['bg'], "foreground": c['fg']},
+            "TEntry": {
+                "fieldbackground": c['input_bg'], 
+                "background": c['input_bg'],
+                "foreground": c['fg'],
+                "insertcolor": c['fg'], # 光标颜色
+                "bordercolor": c['border'],
+                "lightcolor": c['border']
+            },
+            "TButton": {
+                "background": c['header_bg'],
+                "foreground": c['fg'],
+                "bordercolor": c['border'],
+                "padding": 5
+            },
+            "Accent.TButton": {
+                "background": c['accent'],
+                "foreground": "white",
+                "padding": 5
+            },
+            "TNotebook": {
+                "background": c['bg'],
+                "bordercolor": c['border'],
+                "darkcolor": c['bg'],
+                "lightcolor": c['bg']
+            },
+            "TNotebook.Tab": {
+                "background": c['header_bg'],
+                "foreground": c['fg'],
+                "bordercolor": c['border'],
+                "lightcolor": c['bg']
+            },
+            "Treeview": {
+                "background": c['bg'],
+                "foreground": c['fg'],
+                "fieldbackground": c['bg'],
+                "bordercolor": c['border'],
+                "lightcolor": c['bg'],
+                "darkcolor": c['bg']
+            },
+            "Treeview.Heading": {
+                "background": c['header_bg'],
+                "foreground": c['fg'],
+                "bordercolor": c['border'],
+                "relief": "flat"
+            }
+        }
+
+        # 应用所有配置
+        for style_name, config in styles.items():
+            self.style.configure(style_name, **config)
+
+        # 特殊映射配置 (状态切换)
+        self.style.map("TButton", 
+            background=[('active', c['border']), ('disabled', c['bg'])],
+            foreground=[('disabled', '#888888')])
+
+        self.style.map("Accent.TButton", 
+            background=[('active', c['accent_hover']), ('disabled', c['header_bg'])])
+
+        self.style.map("TNotebook.Tab",
+            background=[('selected', c['accent']), ('active', c['accent_hover'])],
+            foreground=[('selected', 'white')])
+
+        self.style.map("Treeview",
+            background=[('selected', c['accent'])],
+            foreground=[('selected', 'white')])
+            
+        self.style.map("TEntry",
+            bordercolor=[('focus', c['accent'])],
+            lightcolor=[('focus', c['accent'])])
+
+        # 更新标题和状态标签
+        if hasattr(self, 'title_label'):
+            self.title_label.configure(bg=c['bg'], fg=c['accent'])
+        if hasattr(self, 'status_label'):
+            self.status_label.configure(foreground=c['status_blue'] if self.dark_mode else c['accent'])
+        
+        # 刷新所有表格标签颜色
+        if hasattr(self, 'tables'):
+            for tree in self.tables.values():
+                self.refresh_tree_tags(tree)
+
+    def toggle_theme(self):
+        """切换深色/浅色模式"""
+        self.dark_mode = not self.dark_mode
+        self.theme_btn.config(text="🌙 深色模式" if not self.dark_mode else "☀️ 浅色模式")
+        self.update_theme_colors()
+
+    def refresh_tree_tags(self, tree):
+        """刷新表格的交替行颜色"""
+        theme = 'dark' if self.dark_mode else 'light'
+        c = self.colors[theme]
+        tree.tag_configure('oddrow', background=c['bg'], foreground=c['fg'])
+        tree.tag_configure('evenrow', background=c['row_alt'], foreground=c['fg'])
+
+
     def create_widgets(self):
         """创建UI组件"""
         # 创建主框架
-        main_frame = ttk.Frame(self.root, padding="10")
-        main_frame.pack(fill=tk.BOTH, expand=True)
+        self.main_frame = ttk.Frame(self.root, padding="20")
+        self.main_frame.pack(fill=tk.BOTH, expand=True)
         
-        # 顶部控制区域
-        control_frame = ttk.LabelFrame(main_frame, text="控制选项", padding="10")
-        control_frame.pack(fill=tk.X, pady=5)
+        # 顶部标题和模式切换
+        header_frame = ttk.Frame(self.main_frame)
+        header_frame.pack(fill=tk.X, pady=(0, 15))
         
-        # 加载数据按钮
-        self.load_btn = ttk.Button(control_frame, text="加载数据", command=self.load_data)
-        self.load_btn.pack(side=tk.LEFT, padx=5)
+        title_label = tk.Label(header_frame, text="📊 A股大买卖单分析系统", 
+                             font=("Microsoft YaHei", 18, "bold"), 
+                             bg=self.colors['dark']['bg'], fg=self.colors['dark']['accent'])
+        title_label.pack(side=tk.LEFT)
+        self.title_label = title_label # 保存引用以便更新颜色
         
-        # 状态标签
-        self.status_var = tk.StringVar(value="等待加载数据...")
-        status_label = ttk.Label(control_frame, textvariable=self.status_var, foreground="blue")
-        status_label.pack(side=tk.LEFT, padx=10)
+        self.theme_btn = ttk.Button(header_frame, text="☀️ 浅色模式", command=self.toggle_theme)
+        self.theme_btn.pack(side=tk.RIGHT)
         
-        # 参数设置区域
-        params_frame = ttk.LabelFrame(main_frame, text="参数设置", padding="10")
-        params_frame.pack(fill=tk.X, pady=5)
+        # 控制和设置区域 (放在一行)
+        top_panels = ttk.Frame(self.main_frame)
+        top_panels.pack(fill=tk.X, pady=5)
         
-        # 买入阈值
-        ttk.Label(params_frame, text="买入阈值（1-10000手）：").grid(row=0, column=0, padx=5, pady=5, sticky=tk.W)
+        # 加载数据面板
+        load_frame = ttk.LabelFrame(top_panels, text="文件操作", padding="15")
+        load_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
+        
+        self.load_btn = ttk.Button(load_frame, text="📂 加载原始成交数据", command=self.load_data, style="Accent.TButton")
+        self.load_btn.pack(pady=5)
+        
+        self.status_var = tk.StringVar(value="准备就绪")
+        self.status_label = ttk.Label(load_frame, textvariable=self.status_var, wraplength=200)
+        self.status_label.pack(pady=5)
+        
+        # 参数设置面板
+        params_frame = ttk.LabelFrame(top_panels, text="分析参数设置", padding="15")
+        params_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        grid_frame = ttk.Frame(params_frame)
+        grid_frame.pack(expand=True)
+        
+        ttk.Label(grid_frame, text="买入阈值 (手):").grid(row=0, column=0, padx=10, pady=5, sticky=tk.E)
         self.buy_threshold = tk.StringVar(value="5000")
-        buy_entry = ttk.Entry(params_frame, textvariable=self.buy_threshold, width=10)
-        buy_entry.grid(row=0, column=1, padx=5, pady=5)
+        buy_entry = ttk.Entry(grid_frame, textvariable=self.buy_threshold, width=15)
+        buy_entry.grid(row=0, column=1, padx=10, pady=5)
         
-        # 卖出阈值
-        ttk.Label(params_frame, text="卖出阈值（1-10000手）：").grid(row=0, column=2, padx=5, pady=5, sticky=tk.W)
+        ttk.Label(grid_frame, text="卖出阈值 (手):").grid(row=0, column=2, padx=10, pady=5, sticky=tk.E)
         self.sell_threshold = tk.StringVar(value="5000")
-        sell_entry = ttk.Entry(params_frame, textvariable=self.sell_threshold, width=10)
-        sell_entry.grid(row=0, column=3, padx=5, pady=5)
+        sell_entry = ttk.Entry(grid_frame, textvariable=self.sell_threshold, width=15)
+        sell_entry.grid(row=0, column=3, padx=10, pady=5)
         
-        # 分析按钮
-        analyze_btn = ttk.Button(params_frame, text="开始分析", command=self.analyze_data)
-        analyze_btn.grid(row=0, column=4, padx=10, pady=5)
+        self.analyze_btn = ttk.Button(grid_frame, text="🚀 开始扫描分析", command=self.analyze_data, style="Accent.TButton")
+        self.analyze_btn.grid(row=0, column=4, padx=20, pady=5)
         
         # 结果显示区域
-        result_frame = ttk.LabelFrame(main_frame, text="分析结果", padding="10")
-        result_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+        result_frame = ttk.LabelFrame(self.main_frame, text="多维度分析结果", padding="5")
+        result_frame.pack(fill=tk.BOTH, expand=True, pady=(15, 0))
         
         # 创建标签页控件
         self.notebook = ttk.Notebook(result_frame)
         self.notebook.pack(fill=tk.BOTH, expand=True)
         
-        # 创建表格容器，每个市场一个标签页
+        # 创建表格容器
         self.tables = {}
-        self.table_frames = {}
-        markets = ['全部股票', '沪市', '深市', '创业板']
+        markets = [('全部股票', '🌐'), ('沪市', '🏛️'), ('深市', '🏙️'), ('创业板', '🚀')]
         
-        for market in markets:
+        for market_name, emoji in markets:
             # 创建标签页框架
-            frame = ttk.Frame(self.notebook)
-            self.table_frames[market] = frame
+            frame = ttk.Frame(self.notebook, padding=5)
+            self.notebook.add(frame, text=f"{emoji} {market_name}")
             
-            # 添加到标签页
-            self.notebook.add(frame, text=market)
-            
-            # 创建滚动条
-            scrollbar_y = ttk.Scrollbar(frame, orient=tk.VERTICAL)
-            scrollbar_x = ttk.Scrollbar(frame, orient=tk.HORIZONTAL)
+            # 创建表格和滚动条容器
+            table_container = ttk.Frame(frame)
+            table_container.pack(fill=tk.BOTH, expand=True)
             
             # 创建表格
-            columns = ('股票代码', '大买单笔数', '大买单总手数', '大卖单笔数', '大卖单总手数', '总成交手数')
-            tree = ttk.Treeview(frame, columns=columns, show='headings', 
-                               yscrollcommand=scrollbar_y.set, xscrollcommand=scrollbar_x.set)
+            columns = ('股票代码', '大买单笔数', '大买单总手数', '大卖单笔数', '大卖单总手数', '总成交手数', '买卖力度')
+            tree = ttk.Treeview(table_container, columns=columns, show='headings', selectmode='browse')
             
             # 设置列宽和对齐方式
-            tree.column('股票代码', width=100, anchor=tk.CENTER)
-            tree.column('大买单笔数', width=100, anchor=tk.CENTER)
-            tree.column('大买单总手数', width=120, anchor=tk.CENTER)
-            tree.column('大卖单笔数', width=100, anchor=tk.CENTER)
-            tree.column('大卖单总手数', width=120, anchor=tk.CENTER)
-            tree.column('总成交手数', width=120, anchor=tk.CENTER)
+            tree.column('股票代码', width=120, anchor=tk.CENTER)
+            tree.column('大买单笔数', width=120, anchor=tk.CENTER)
+            tree.column('大买单总手数', width=150, anchor=tk.CENTER)
+            tree.column('大卖单笔数', width=120, anchor=tk.CENTER)
+            tree.column('大卖单总手数', width=150, anchor=tk.CENTER)
+            tree.column('总成交手数', width=150, anchor=tk.CENTER)
+            tree.column('买卖力度', width=120, anchor=tk.CENTER)
             
             # 设置列标题
-            tree.heading('股票代码', text='股票代码')
-            tree.heading('大买单笔数', text='大买单笔数')
-            tree.heading('大买单总手数', text='大买单总手数')
-            tree.heading('大卖单笔数', text='大卖单笔数')
-            tree.heading('大卖单总手数', text='大卖单总手数')
-            tree.heading('总成交手数', text='总成交手数')
+            for col in columns:
+                tree.heading(col, text=col, command=lambda _col=col, _tree=tree: self.sort_column(_tree, _col, False))
             
-            # 配置滚动条
-            scrollbar_y.config(command=tree.yview)
-            scrollbar_x.config(command=tree.xview)
+            # 滚动条
+            scrollbar_y = ttk.Scrollbar(table_container, orient=tk.VERTICAL, command=tree.yview)
+            tree.configure(yscrollcommand=scrollbar_y.set)
             
-            # 布局
             scrollbar_y.pack(side=tk.RIGHT, fill=tk.Y)
-            scrollbar_x.pack(side=tk.BOTTOM, fill=tk.X)
             tree.pack(fill=tk.BOTH, expand=True)
             
             # 保存表格引用
-            self.tables[market] = tree
-    
+            self.tables[market_name] = tree
+            self.refresh_tree_tags(tree)
+
+    def sort_column(self, tree, col, reverse):
+        """表格点击标题排序"""
+        l = [(tree.set(k, col), k) for k in tree.get_children('')]
+        
+        # 尝试转换为数字进行排序
+        try:
+            l.sort(key=lambda t: float(t[0].replace('%', '')), reverse=reverse)
+        except ValueError:
+            l.sort(reverse=reverse)
+
+        for index, (val, k) in enumerate(l):
+            tree.move(k, '', index)
+            # 更新交替行颜色
+            tree.item(k, tags=('evenrow' if index % 2 == 0 else 'oddrow'))
+        
+        # 反向排序逻辑
+        tree.heading(col, command=lambda: self.sort_column(tree, col, not reverse))
+
     def load_data(self):
         """加载数据"""
-        # 禁用加载按钮
         self.load_btn.config(state=tk.DISABLED)
-        self.status_var.set("正在加载数据...")
+        self.analyze_btn.config(state=tk.DISABLED)
         
         # 清空所有表格
-        for market, tree in self.tables.items():
+        for tree in self.tables.values():
             for item in tree.get_children():
                 tree.delete(item)
         
-        # 在后台线程中加载数据
         def load_thread():
             self.analyzer.load_data(progress_callback=self.update_status)
-            self.analyzer.is_loaded = True
-            self.root.after(0, lambda: self.load_btn.config(state=tk.NORMAL))
-            self.root.after(0, lambda: self.status_var.set("数据加载完成！"))
+            self.root.after(0, self.on_load_complete)
         
         thread = threading.Thread(target=load_thread)
         thread.daemon = True
         thread.start()
     
+    def on_load_complete(self):
+        """加载完成后的回调"""
+        self.load_btn.config(state=tk.NORMAL)
+        self.analyze_btn.config(state=tk.NORMAL)
+        if self.analyzer.is_loaded:
+            self.status_var.set("✅ 数据就绪，可以开始分析")
+    
     def update_status(self, message):
         """更新状态信息"""
         self.root.after(0, lambda: self.status_var.set(message))
-    
+        # 根据消息类型改变颜色 (简易判断)
+        if "错误" in message or "⚠️" in message:
+            color = self.colors['dark' if self.dark_mode else 'light']['status_red']
+        elif "完成" in message or "✅" in message:
+            color = self.colors['dark' if self.dark_mode else 'light']['status_green']
+        else:
+            color = self.colors['dark' if self.dark_mode else 'light']['status_blue']
+        self.root.after(0, lambda: self.status_label.configure(foreground=color))
+
     def analyze_data(self):
         """分析数据"""
         if not self.analyzer.is_loaded:
-            self.status_var.set("请先加载数据！")
+            self.update_status("⚠️ 请先加载数据！")
             return
         
         try:
-            # 获取阈值
             buy_threshold = int(self.buy_threshold.get())
             sell_threshold = int(self.sell_threshold.get())
             
-            # 验证阈值范围
-            if not (1 <= buy_threshold <= 10000 and 1 <= sell_threshold <= 10000):
-                self.status_var.set("阈值必须在1-10000手之间！")
+            if not (1 <= buy_threshold <= 20000 and 1 <= sell_threshold <= 20000):
+                self.update_status("⚠️ 阈值范围: 1-20000手")
                 return
             
-            # 分析数据
-            self.status_var.set("正在分析数据...")
+            self.update_status("🔍 正在深度分析中...")
             results = self.analyzer.analyze_big_trades(buy_threshold, sell_threshold)
             
-            # 显示结果
             self.display_results(results)
-            self.status_var.set(f"分析完成！买入阈值：{buy_threshold}手，卖出阈值：{sell_threshold}手")
+            self.update_status(f"✅ 分析完成 (买:{buy_threshold}/卖:{sell_threshold})")
             
         except ValueError:
-            self.status_var.set("请输入有效的整数！")
+            self.update_status("⚠️ 请输入有效的整数阈值")
         except Exception as e:
-            self.status_var.set(f"分析出错：{e}")
+            self.update_status(f"⚠️ 分析出错: {e}")
     
     def display_results(self, results):
         """将结果显示在表格中"""
-        # 清空所有表格
         for market, tree in self.tables.items():
             for item in tree.get_children():
                 tree.delete(item)
-        
-        # 填充数据到对应表格
-        for market, data in results.items():
-            if market in self.tables:
-                tree = self.tables[market]
-                for stock in data:
+            
+            if market in results:
+                for i, stock in enumerate(results[market]):
+                    # 计算买卖力度 (买入总额 / 卖出总额)
+                    ratio = "N/A"
+                    if stock['大卖单总手数'] > 0:
+                        ratio = f"{stock['大买单总手数'] / stock['大卖单总手数']:.2f}"
+                    elif stock['大买单总手数'] > 0:
+                        ratio = "∞"
+                    
+                    tag = 'evenrow' if i % 2 == 0 else 'oddrow'
                     tree.insert('', tk.END, values=(
                         stock['股票代码'],
                         stock['大买单笔数'],
-                        stock['大买单总手数'],
+                        f"{stock['大买单总手数']:,.0f}",
                         stock['大卖单笔数'],
-                        stock['大卖单总手数'],
-                        stock['总成交手数']
-                    ))
+                        f"{stock['大卖单总手数']:,.0f}",
+                        f"{stock['总成交手数']:,.0f}",
+                        ratio
+                    ), tags=(tag,))
 
 if __name__ == "__main__":
-    # 创建并运行UI
+    # 设置 DPI 感知以保证在 Windows 高分屏下不模糊
+    try:
+        from ctypes import windll
+        windll.shcore.SetProcessDpiAwareness(1)
+    except:
+        pass
+        
     root = tk.Tk()
     app = BigTradeUI(root)
+    
+    # 窗口标题美化
+    root.title("A股顶级机构大单异动监控系统")
+    
     root.mainloop()
+
