@@ -9,7 +9,8 @@ from datetime import datetime
 
 # 定义常量
 MARKET_MAP = {
-    '沪市': lambda code: code.startswith('6'),
+    '沪市': lambda code: code.startswith('6') and not code.startswith('688'),
+    '科创板': lambda code: code.startswith('688'),
     '深市': lambda code: code.startswith('000'),
     '创业板': lambda code: code.startswith('300') or code.startswith('301')
 }
@@ -20,8 +21,9 @@ class BigTradeAnalyzer:
         self.stock_data = {}
         self.market_data = {
             '全部股票': {},
-            '沪市': {},
-            '深市': {},
+            '沪市主板': {},
+            '科创板': {},
+            '深市主板': {},
             '创业板': {}
         }
         self.is_loaded = False
@@ -83,12 +85,14 @@ class BigTradeAnalyzer:
                 self.stock_data[stock_code] = df
                 
                 # 分类到不同市场
-                if stock_code.startswith('6'):
-                    self.market_data['沪市'][stock_code] = df
+                if stock_code.startswith('688'):
+                    self.market_data['科创板'][stock_code] = df
+                elif stock_code.startswith('6'):
+                    self.market_data['沪市主板'][stock_code] = df
                 elif stock_code.startswith('3'):
                     self.market_data['创业板'][stock_code] = df
                 elif stock_code.startswith('0'):
-                    self.market_data['深市'][stock_code] = df
+                    self.market_data['深市主板'][stock_code] = df
                 
                 # 所有股票都添加到"全部股票"中
                 self.market_data['全部股票'][stock_code] = df
@@ -394,7 +398,7 @@ class BigTradeUI:
         
         # 创建表格容器
         self.tables = {}
-        markets = [('全部股票', '🌐'), ('沪市', '🏛️'), ('深市', '🏙️'), ('创业板', '🚀')]
+        markets = [('全部股票', '🌐'), ('沪市主板', '🏛️'), ('深市主板', '🏙️'), ('创业板', '🚀'), ('科创板', '🔬')]
         
         for market_name, emoji in markets:
             # 创建标签页框架
