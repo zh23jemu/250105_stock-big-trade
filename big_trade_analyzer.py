@@ -3,7 +3,7 @@ import pandas as pd
 import glob
 import random
 import tkinter as tk
-from tkinter import ttk, scrolledtext
+from tkinter import ttk
 import threading
 
 # 定义常量
@@ -122,32 +122,12 @@ class BigTradeAnalyzer:
             results[market] = market_results
         
         return results
-    
-    def format_results(self, results, buy_threshold, sell_threshold):
-        """格式化结果为字符串"""
-        output = []
-        output.append("=" * 80)
-        output.append(f"大买卖单分析结果（买入阈值：{buy_threshold}手，卖出阈值：{sell_threshold}手）")
-        output.append("=" * 80)
-        
-        for market, data in results.items():
-            output.append(f"\n{market}（共{len(data)}只股票）")
-            output.append("-" * 80)
-            output.append(f"{'股票代码':<10} {'大买单笔数':<10} {'大买单总手数':<12} {'大卖单笔数':<10} {'大卖单总手数':<12} {'总成交手数':<15}")
-            output.append("-" * 80)
-            
-            for stock in data:
-                output.append(f"{stock['股票代码']:<10} {stock['大买单笔数']:<10} {stock['大买单总手数']:<12} {stock['大卖单笔数']:<10} {stock['大卖单总手数']:<12} {stock['总成交手数']:<15}")
-            
-            output.append("-" * 80)
-        
-        return "\n".join(output)
 
 class BigTradeUI:
     def __init__(self, root):
         self.root = root
         self.root.title("A股大买卖单分析系统")
-        self.root.geometry("1000x700")
+        self.root.geometry("1200x800")
         
         # 初始化分析器
         self.analyzer = BigTradeAnalyzer('deal_20251231')
@@ -198,9 +178,59 @@ class BigTradeUI:
         result_frame = ttk.LabelFrame(main_frame, text="分析结果", padding="10")
         result_frame.pack(fill=tk.BOTH, expand=True, pady=5)
         
-        # 结果文本框
-        self.result_text = scrolledtext.ScrolledText(result_frame, wrap=tk.WORD, font=('Consolas', 10))
-        self.result_text.pack(fill=tk.BOTH, expand=True)
+        # 创建标签页控件
+        self.notebook = ttk.Notebook(result_frame)
+        self.notebook.pack(fill=tk.BOTH, expand=True)
+        
+        # 创建表格容器，每个市场一个标签页
+        self.tables = {}
+        self.table_frames = {}
+        markets = ['全部股票', '沪市', '深市', '创业板']
+        
+        for market in markets:
+            # 创建标签页框架
+            frame = ttk.Frame(self.notebook)
+            self.table_frames[market] = frame
+            
+            # 添加到标签页
+            self.notebook.add(frame, text=market)
+            
+            # 创建滚动条
+            scrollbar_y = ttk.Scrollbar(frame, orient=tk.VERTICAL)
+            scrollbar_x = ttk.Scrollbar(frame, orient=tk.HORIZONTAL)
+            
+            # 创建表格
+            columns = ('股票代码', '大买单笔数', '大买单总手数', '大卖单笔数', '大卖单总手数', '总成交手数')
+            tree = ttk.Treeview(frame, columns=columns, show='headings', 
+                               yscrollcommand=scrollbar_y.set, xscrollcommand=scrollbar_x.set)
+            
+            # 设置列宽和对齐方式
+            tree.column('股票代码', width=100, anchor=tk.CENTER)
+            tree.column('大买单笔数', width=100, anchor=tk.CENTER)
+            tree.column('大买单总手数', width=120, anchor=tk.CENTER)
+            tree.column('大卖单笔数', width=100, anchor=tk.CENTER)
+            tree.column('大卖单总手数', width=120, anchor=tk.CENTER)
+            tree.column('总成交手数', width=120, anchor=tk.CENTER)
+            
+            # 设置列标题
+            tree.heading('股票代码', text='股票代码')
+            tree.heading('大买单笔数', text='大买单笔数')
+            tree.heading('大买单总手数', text='大买单总手数')
+            tree.heading('大卖单笔数', text='大卖单笔数')
+            tree.heading('大卖单总手数', text='大卖单总手数')
+            tree.heading('总成交手数', text='总成交手数')
+            
+            # 配置滚动条
+            scrollbar_y.config(command=tree.yview)
+            scrollbar_x.config(command=tree.xview)
+            
+            # 布局
+            scrollbar_y.pack(side=tk.RIGHT, fill=tk.Y)
+            scrollbar_x.pack(side=tk.BOTTOM, fill=tk.X)
+            tree.pack(fill=tk.BOTH, expand=True)
+            
+            # 保存表格引用
+            self.tables[market] = tree
     
     def load_data(self):
         """加载数据"""
@@ -208,8 +238,10 @@ class BigTradeUI:
         self.load_btn.config(state=tk.DISABLED)
         self.status_var.set("正在加载数据...")
         
-        # 清空结果
-        self.result_text.delete(1.0, tk.END)
+        # 清空所有表格
+        for market, tree in self.tables.items():
+            for item in tree.get_children():
+                tree.delete(item)
         
         # 在后台线程中加载数据
         def load_thread():
@@ -225,8 +257,6 @@ class BigTradeUI:
     def update_status(self, message):
         """更新状态信息"""
         self.root.after(0, lambda: self.status_var.set(message))
-        self.result_text.insert(tk.END, message + "\n")
-        self.result_text.see(tk.END)
     
     def analyze_data(self):
         """分析数据"""
@@ -248,16 +278,35 @@ class BigTradeUI:
             self.status_var.set("正在分析数据...")
             results = self.analyzer.analyze_big_trades(buy_threshold, sell_threshold)
             
-            # 格式化并显示结果
-            formatted_results = self.analyzer.format_results(results, buy_threshold, sell_threshold)
-            self.result_text.delete(1.0, tk.END)
-            self.result_text.insert(tk.END, formatted_results)
-            self.status_var.set("分析完成！")
+            # 显示结果
+            self.display_results(results)
+            self.status_var.set(f"分析完成！买入阈值：{buy_threshold}手，卖出阈值：{sell_threshold}手")
             
         except ValueError:
             self.status_var.set("请输入有效的整数！")
         except Exception as e:
             self.status_var.set(f"分析出错：{e}")
+    
+    def display_results(self, results):
+        """将结果显示在表格中"""
+        # 清空所有表格
+        for market, tree in self.tables.items():
+            for item in tree.get_children():
+                tree.delete(item)
+        
+        # 填充数据到对应表格
+        for market, data in results.items():
+            if market in self.tables:
+                tree = self.tables[market]
+                for stock in data:
+                    tree.insert('', tk.END, values=(
+                        stock['股票代码'],
+                        stock['大买单笔数'],
+                        stock['大买单总手数'],
+                        stock['大卖单笔数'],
+                        stock['大卖单总手数'],
+                        stock['总成交手数']
+                    ))
 
 if __name__ == "__main__":
     # 创建并运行UI
