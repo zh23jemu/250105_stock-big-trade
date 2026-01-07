@@ -6,6 +6,7 @@ import tkinter as tk
 from tkinter import ttk
 import threading
 from datetime import datetime
+import akshare as ak
 
 # 定义常量
 MARKET_MAP = {
@@ -26,6 +27,7 @@ class BigTradeAnalyzer:
             '深市主板': {},
             '创业板': {}
         }
+        self.stock_name_cache = {}  # 股票名称缓存，避免重复请求
         self.is_loaded = False
     
     def load_data(self, progress_callback=None):
@@ -105,14 +107,46 @@ class BigTradeAnalyzer:
             progress_callback("✅ 数据加载完成！")
         self.is_loaded = True
     
-    def analyze_big_trades(self, buy_threshold, sell_threshold):
+    def get_stock_name(self, stock_code):
+        """使用akshare获取股票名称，带缓存"""
+        if stock_code in self.stock_name_cache:
+            return self.stock_name_cache[stock_code]
+        
+        try:
+            # 使用akshare获取所有A股代码和名称
+            stock_info = ak.stock_info_a_code_name()
+            # 将DataFrame转换为字典，方便查找
+            stock_dict = dict(zip(stock_info['code'], stock_info['name']))
+            
+            # 更新缓存
+            self.stock_name_cache = stock_dict
+            
+            # 获取当前股票名称
+            stock_name = stock_dict.get(stock_code, stock_code)
+            return stock_name
+        except Exception as e:
+            print(f"获取股票名称失败: {e}")
+            return stock_code
+    
+    def analyze_big_trades(self, buy_threshold, sell_threshold, progress_callback=None):
         """分析大买卖单"""
         results = {}
+        
+        # 计算总股票数量
+        total_stocks = sum(len(stocks) for stocks in self.market_data.values())
+        processed_stocks = 0
         
         for market, stocks in self.market_data.items():
             market_results = []
             
             for stock_code, df in stocks.items():
+                processed_stocks += 1
+                
+                # 更新进度
+                if progress_callback:
+                    progress = (processed_stocks / total_stocks) * 100
+                    progress_callback(f"🔍 分析中: {market} - {stock_code} ({processed_stocks}/{total_stocks}, {progress:.1f}%)")
+                
                 # 统计大买单（Side=1 是主动买）
                 big_buys = df[(df['Side'] == 1) & (df['Volume_Hand'] >= buy_threshold)]
                 # 统计大卖单（Side=-1 或 -11 是主动卖）
@@ -131,8 +165,11 @@ class BigTradeAnalyzer:
                 
                 # 如果有大买单或大卖单，添加到结果中
                 if count_big_buy > 0 or count_big_sell > 0:
+                    # 获取股票名称，默认使用代码
+                    stock_name = self.get_stock_name(stock_code)
                     market_results.append({
                         '股票代码': stock_code,
+                        '股票名称': stock_name,
                         '大买单笔数': count_big_buy,
                         '大买单总手数': round(total_big_buy, 2),
                         '大卖单笔数': count_big_sell,
@@ -410,11 +447,12 @@ class BigTradeUI:
             table_container.pack(fill=tk.BOTH, expand=True)
             
             # 创建表格
-            columns = ('股票代码', '大买单笔数', '大买单总手数', '大卖单笔数', '大卖单总手数', '总成交手数', '买卖力度')
+            columns = ('股票代码', '股票名称', '大买单笔数', '大买单总手数', '大卖单笔数', '大卖单总手数', '总成交手数', '买卖力度')
             tree = ttk.Treeview(table_container, columns=columns, show='headings', selectmode='browse')
             
             # 设置列宽和对齐方式
             tree.column('股票代码', width=120, anchor=tk.CENTER)
+            tree.column('股票名称', width=150, anchor=tk.CENTER)
             tree.column('大买单笔数', width=120, anchor=tk.CENTER)
             tree.column('大买单总手数', width=150, anchor=tk.CENTER)
             tree.column('大卖单笔数', width=120, anchor=tk.CENTER)
@@ -506,16 +544,40 @@ class BigTradeUI:
                 self.update_status("⚠️ 阈值范围: 1-20000手")
                 return
             
-            self.update_status("🔍 正在深度分析中...")
-            results = self.analyzer.analyze_big_trades(buy_threshold, sell_threshold)
+            # 禁用按钮防止重复点击
+            self.analyze_btn.config(state=tk.DISABLED)
+            self.load_btn.config(state=tk.DISABLED)
             
-            self.display_results(results)
-            self.update_status(f"✅ 分析完成 (买:{buy_threshold}/卖:{sell_threshold})")
+            def analyze_thread():
+                """分析线程"""
+                try:
+                    results = self.analyzer.analyze_big_trades(buy_threshold, sell_threshold, progress_callback=self.update_status)
+                    self.root.after(0, lambda: self.on_analyze_complete(results, buy_threshold, sell_threshold))
+                except Exception as e:
+                    self.root.after(0, lambda: self.update_status(f"⚠️ 分析出错: {e}"))
+                    self.root.after(0, self.on_analyze_error)
+            
+            # 启动分析线程
+            thread = threading.Thread(target=analyze_thread)
+            thread.daemon = True
+            thread.start()
             
         except ValueError:
             self.update_status("⚠️ 请输入有效的整数阈值")
         except Exception as e:
             self.update_status(f"⚠️ 分析出错: {e}")
+    
+    def on_analyze_complete(self, results, buy_threshold, sell_threshold):
+        """分析完成后的回调"""
+        self.display_results(results)
+        self.update_status(f"✅ 分析完成 (买:{buy_threshold}/卖:{sell_threshold})")
+        self.analyze_btn.config(state=tk.NORMAL)
+        self.load_btn.config(state=tk.NORMAL)
+    
+    def on_analyze_error(self):
+        """分析出错后的回调"""
+        self.analyze_btn.config(state=tk.NORMAL)
+        self.load_btn.config(state=tk.NORMAL)
     
     def display_results(self, results):
         """将结果显示在表格中"""
@@ -535,6 +597,7 @@ class BigTradeUI:
                     tag = 'evenrow' if i % 2 == 0 else 'oddrow'
                     tree.insert('', tk.END, values=(
                         stock['股票代码'],
+                        stock['股票名称'],
                         stock['大买单笔数'],
                         f"{stock['大买单总手数']:,.0f}",
                         stock['大卖单笔数'],
