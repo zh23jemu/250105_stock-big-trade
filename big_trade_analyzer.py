@@ -242,6 +242,13 @@ class BigTradeAnalyzer:
                 if count_big_buy > 0 or count_big_sell > 0:
                     # 获取股票名称，默认使用代码
                     stock_name = self.get_stock_name(stock_code)
+                    
+                    # 保存详细的大单交易记录
+                    big_trades = {
+                        'buys': big_buys.to_dict('records'),
+                        'sells': big_sells.to_dict('records')
+                    }
+                    
                     market_results.append({
                         '股票代码': stock_code,
                         '股票名称': stock_name,
@@ -251,7 +258,8 @@ class BigTradeAnalyzer:
                         '大卖单笔数': count_big_sell,
                         '大卖单总手数': round(total_big_sell, 2),
                         '大卖单总金额': round(total_big_sell_amount, 2),
-                        '总成交手数': round(total_volume, 2)
+                        '总成交手数': round(total_volume, 2),
+                        'big_trades': big_trades  # 保存详细的大单交易记录
                     })
             
             # 按大买单总手数降序排序
@@ -659,8 +667,9 @@ class BigTradeUI:
         self.load_btn.config(state=tk.NORMAL)
     
     def display_results(self, results):
-        """将结果显示在表格中"""
+        """将结果显示在表格中，支持二级列表查看详细交易"""
         for market, tree in self.tables.items():
+            # 清空表格
             for item in tree.get_children():
                 tree.delete(item)
             
@@ -674,7 +683,9 @@ class BigTradeUI:
                         ratio = "∞"
                     
                     tag = 'evenrow' if i % 2 == 0 else 'oddrow'
-                    tree.insert('', tk.END, values=(
+                    
+                    # 插入主节点（股票汇总信息）
+                    main_item = tree.insert('', tk.END, values=(
                         stock['股票代码'],
                         stock['股票名称'],
                         stock['大买单笔数'],
@@ -686,6 +697,36 @@ class BigTradeUI:
                         f"{stock['总成交手数']:,.0f}",
                         ratio
                     ), tags=(tag,))
+                    
+                    # 插入子节点（详细买单）
+                    if stock['big_trades']['buys']:
+                        # 买单汇总节点
+                        buy_summary_item = tree.insert(main_item, tk.END, values=(
+                            '', '买单详情', f"共{len(stock['big_trades']['buys'])}笔", '', '', '', '', '', '', ''
+                        ), tags=('buy_summary',))
+                        
+                        # 买单明细节点
+                        for trade in stock['big_trades']['buys']:
+                            tree.insert(buy_summary_item, tk.END, values=(
+                                '', f"{trade['DealTime']}", f"手数: {trade['Volume_Hand']:.2f}", 
+                                f"价格: {trade['Price']:.2f}", f"金额: {(trade['Price'] * trade['Volume']):,.2f}", 
+                                '', '', '', '', ''
+                            ), tags=('trade_detail',))
+                    
+                    # 插入子节点（详细卖单）
+                    if stock['big_trades']['sells']:
+                        # 卖单汇总节点
+                        sell_summary_item = tree.insert(main_item, tk.END, values=(
+                            '', '卖单详情', f"共{len(stock['big_trades']['sells'])}笔", '', '', '', '', '', '', ''
+                        ), tags=('sell_summary',))
+                        
+                        # 卖单明细节点
+                        for trade in stock['big_trades']['sells']:
+                            tree.insert(sell_summary_item, tk.END, values=(
+                                '', f"{trade['DealTime']}", f"手数: {trade['Volume_Hand']:.2f}", 
+                                f"价格: {trade['Price']:.2f}", f"金额: {(trade['Price'] * trade['Volume']):,.2f}", 
+                                '', '', '', '', ''
+                            ), tags=('trade_detail',))
 
 if __name__ == "__main__":
     import argparse
