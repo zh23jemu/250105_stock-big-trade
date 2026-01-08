@@ -31,7 +31,7 @@ class BigTradeAnalyzer:
         self.is_loaded = False
     
     def load_data(self, progress_callback=None):
-        """加载随机500只股票数据"""
+        """加载所有股票数据"""
         if not os.path.exists(self.data_dir):
             if progress_callback:
                 progress_callback(f"错误: 目录 {self.data_dir} 不存在")
@@ -45,13 +45,12 @@ class BigTradeAnalyzer:
                 progress_callback(f"错误: 在 {self.data_dir} 中未找到 CSV 文件")
             return
 
-        # 随机选择500只股票
-        sample_size = min(500, total_files)
-        selected_files = random.sample(csv_files, sample_size)
+        # 加载所有股票
+        selected_files = csv_files
         
         if progress_callback:
             progress_callback(f"🔍 共发现 {total_files} 只股票数据")
-            progress_callback(f"🎲 随机选择 {sample_size} 只股票进行分析")
+            progress_callback(f"📥 开始加载所有 {total_files} 只股票数据")
         
         # 清空旧数据
         self.stock_data = {}
@@ -60,9 +59,9 @@ class BigTradeAnalyzer:
 
         for i, file_path in enumerate(selected_files):
             # 显示进度
-            progress = (i + 1) / sample_size * 100
+            progress = (i + 1) / total_files * 100
             if progress_callback:
-                progress_callback(f"⏳ 加载进度: {progress:.1f}% ({i+1}/{sample_size})")
+                progress_callback(f"⏳ 加载进度: {progress:.1f}% ({i+1}/{total_files})")
             
             # 从文件名提取股票代码
             filename = os.path.basename(file_path)
@@ -159,6 +158,11 @@ class BigTradeAnalyzer:
                 total_big_buy = big_buys['Volume_Hand'].sum()
                 total_big_sell = big_sells['Volume_Hand'].sum()
                 
+                # 计算大买单和大卖单的总金额（金额 = 价格 * 成交量）
+                # 注意：Volume是股数，1手=100股，所以总金额 = 价格 * Volume
+                total_big_buy_amount = (big_buys['Price'] * big_buys['Volume']).sum()
+                total_big_sell_amount = (big_sells['Price'] * big_sells['Volume']).sum()
+                
                 # 计算大买单和大卖单的笔数
                 count_big_buy = len(big_buys)
                 count_big_sell = len(big_sells)
@@ -172,8 +176,10 @@ class BigTradeAnalyzer:
                         '股票名称': stock_name,
                         '大买单笔数': count_big_buy,
                         '大买单总手数': round(total_big_buy, 2),
+                        '大买单总金额': round(total_big_buy_amount, 2),
                         '大卖单笔数': count_big_sell,
                         '大卖单总手数': round(total_big_sell, 2),
+                        '大卖单总金额': round(total_big_sell_amount, 2),
                         '总成交手数': round(total_volume, 2)
                     })
             
@@ -447,7 +453,7 @@ class BigTradeUI:
             table_container.pack(fill=tk.BOTH, expand=True)
             
             # 创建表格
-            columns = ('股票代码', '股票名称', '大买单笔数', '大买单总手数', '大卖单笔数', '大卖单总手数', '总成交手数', '买卖力度')
+            columns = ('股票代码', '股票名称', '大买单笔数', '大买单总手数', '大买单总金额', '大卖单笔数', '大卖单总手数', '大卖单总金额', '总成交手数', '买卖力度')
             tree = ttk.Treeview(table_container, columns=columns, show='headings', selectmode='browse')
             
             # 设置列宽和对齐方式
@@ -455,8 +461,10 @@ class BigTradeUI:
             tree.column('股票名称', width=150, anchor=tk.CENTER)
             tree.column('大买单笔数', width=120, anchor=tk.CENTER)
             tree.column('大买单总手数', width=150, anchor=tk.CENTER)
+            tree.column('大买单总金额', width=180, anchor=tk.CENTER)
             tree.column('大卖单笔数', width=120, anchor=tk.CENTER)
             tree.column('大卖单总手数', width=150, anchor=tk.CENTER)
+            tree.column('大卖单总金额', width=180, anchor=tk.CENTER)
             tree.column('总成交手数', width=150, anchor=tk.CENTER)
             tree.column('买卖力度', width=120, anchor=tk.CENTER)
             
@@ -600,8 +608,10 @@ class BigTradeUI:
                         stock['股票名称'],
                         stock['大买单笔数'],
                         f"{stock['大买单总手数']:,.0f}",
+                        f"{stock['大买单总金额']:,.2f}",
                         stock['大卖单笔数'],
                         f"{stock['大卖单总手数']:,.0f}",
+                        f"{stock['大卖单总金额']:,.2f}",
                         f"{stock['总成交手数']:,.0f}",
                         ratio
                     ), tags=(tag,))
