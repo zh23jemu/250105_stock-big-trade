@@ -580,7 +580,7 @@ class BigTradeUI:
             table_container.pack(fill=tk.BOTH, expand=True)
             
             # 创建表格
-            columns = ('股票代码', '股票名称', '大买单笔数', '大买单总手数', '大买单总金额', '大卖单笔数', '大卖单总手数', '大卖单总金额', '总成交手数', '买卖力度')
+            columns = ('股票代码', '股票名称', '大买单笔数', '大买单总手数', '大买单总金额', '大卖单笔数', '大卖单总手数', '大卖单总金额', '总成交手数', '大单买卖比')
             tree = ttk.Treeview(table_container, columns=columns, show='headings', selectmode='browse')
             
             # 设置列宽和对齐方式
@@ -593,7 +593,7 @@ class BigTradeUI:
             tree.column('大卖单总手数', width=150, anchor=tk.CENTER)
             tree.column('大卖单总金额', width=180, anchor=tk.CENTER)
             tree.column('总成交手数', width=150, anchor=tk.CENTER)
-            tree.column('买卖力度', width=120, anchor=tk.CENTER)
+            tree.column('大单买卖比', width=120, anchor=tk.CENTER)
             
             # 设置列标题
             for col in columns:
@@ -739,11 +739,11 @@ class BigTradeUI:
             
             if market in results:
                 for i, stock in enumerate(results[market]):
-                    # 计算买卖力度 (买入总额 / 卖出总额)
+                    # 计算大单买卖比 (买入总金额 / 卖出总金额)
                     ratio = "N/A"
-                    if stock['大卖单总手数'] > 0:
-                        ratio = f"{stock['大买单总手数'] / stock['大卖单总手数']:.2f}"
-                    elif stock['大买单总手数'] > 0:
+                    if stock['大卖单总金额'] > 0:
+                        ratio = f"{stock['大买单总金额'] / stock['大卖单总金额']:.2f}"
+                    elif stock['大买单总金额'] > 0:
                         ratio = "∞"
                     
                     tag = 'evenrow' if i % 2 == 0 else 'oddrow'
