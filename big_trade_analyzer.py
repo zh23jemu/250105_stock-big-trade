@@ -17,7 +17,7 @@ MARKET_MAP = {
 }
 
 class BigTradeAnalyzer:
-    def __init__(self, data_dir):
+    def __init__(self, data_dir, random_sample=0):
         self.data_dir = data_dir
         self.stock_data = {}
         self.market_data = {
@@ -29,9 +29,10 @@ class BigTradeAnalyzer:
         }
         self.stock_name_cache = {}  # 股票名称缓存，避免重复请求
         self.is_loaded = False
+        self.random_sample = random_sample  # 随机选取的股票总数，0表示选取所有股票
     
     def load_data(self, progress_callback=None):
-        """加载所有股票数据"""
+        """加载股票数据，支持按市场类型随机选取"""
         if not os.path.exists(self.data_dir):
             if progress_callback:
                 progress_callback(f"错误: 目录 {self.data_dir} 不存在")
@@ -45,12 +46,82 @@ class BigTradeAnalyzer:
                 progress_callback(f"错误: 在 {self.data_dir} 中未找到 CSV 文件")
             return
 
-        # 加载所有股票
-        selected_files = csv_files
+        # 按市场类型分类股票文件
+        market_files = {
+            '沪市主板': [],
+            '深市主板': [],
+            '创业板': [],
+            '科创板': []
+        }
+        
+        for file_path in csv_files:
+            # 从文件名提取股票代码
+            filename = os.path.basename(file_path)
+            parts = filename.replace('.csv', '').split('_')
+            stock_code = parts[-1]
+            
+            # 分类到不同市场
+            if stock_code.startswith('688'):
+                market_files['科创板'].append(file_path)
+            elif stock_code.startswith('6'):
+                market_files['沪市主板'].append(file_path)
+            elif stock_code.startswith('3'):
+                market_files['创业板'].append(file_path)
+            elif stock_code.startswith('0'):
+                market_files['深市主板'].append(file_path)
+        
+        # 计算主板总数量（沪市主板 + 深市主板）
+        mainboard_total = len(market_files['沪市主板']) + len(market_files['深市主板'])
+        gem_total = len(market_files['创业板'])
+        star_total = len(market_files['科创板'])
         
         if progress_callback:
             progress_callback(f"🔍 共发现 {total_files} 只股票数据")
-            progress_callback(f"📥 开始加载所有 {total_files} 只股票数据")
+            progress_callback(f"� 市场分布: 沪市主板 {len(market_files['沪市主板'])} 只, 深市主板 {len(market_files['深市主板'])} 只, 创业板 {gem_total} 只, 科创板 {star_total} 只")
+        
+        # 根据random_sample参数决定是否随机选取
+        selected_files = []
+        if self.random_sample > 0:
+            # 按比例分配：主板50%，创业板25%，科创板25%
+            mainboard_count = int(self.random_sample * 0.5)
+            gem_count = int(self.random_sample * 0.25)
+            star_count = int(self.random_sample * 0.25)
+            
+            # 主板再分配到沪市和深市
+            if mainboard_total > 0:
+                # 按沪市和深市的实际比例分配
+                sh_mainboard_ratio = len(market_files['沪市主板']) / mainboard_total
+                sh_mainboard_count = int(mainboard_count * sh_mainboard_ratio)
+                sz_mainboard_count = mainboard_count - sh_mainboard_count
+            else:
+                sh_mainboard_count = 0
+                sz_mainboard_count = 0
+            
+            # 随机选取各市场的股票
+            if sh_mainboard_count > 0:
+                selected_sh = random.sample(market_files['沪市主板'], min(sh_mainboard_count, len(market_files['沪市主板'])))
+                selected_files.extend(selected_sh)
+            
+            if sz_mainboard_count > 0:
+                selected_sz = random.sample(market_files['深市主板'], min(sz_mainboard_count, len(market_files['深市主板'])))
+                selected_files.extend(selected_sz)
+            
+            if gem_count > 0:
+                selected_gem = random.sample(market_files['创业板'], min(gem_count, len(market_files['创业板'])))
+                selected_files.extend(selected_gem)
+            
+            if star_count > 0:
+                selected_star = random.sample(market_files['科创板'], min(star_count, len(market_files['科创板'])))
+                selected_files.extend(selected_star)
+            
+            if progress_callback:
+                progress_callback(f"🎲 随机选取 {len(selected_files)} 只股票进行分析")
+                progress_callback(f"📋 选取分布: 沪市主板 {len(selected_sh) if 'selected_sh' in locals() else 0} 只, 深市主板 {len(selected_sz) if 'selected_sz' in locals() else 0} 只, 创业板 {len(selected_gem) if 'selected_gem' in locals() else 0} 只, 科创板 {len(selected_star) if 'selected_star' in locals() else 0} 只")
+        else:
+            # 加载所有股票
+            selected_files = csv_files
+            if progress_callback:
+                progress_callback(f"�📥 开始加载所有 {total_files} 只股票数据")
         
         # 清空旧数据
         self.stock_data = {}
@@ -59,9 +130,9 @@ class BigTradeAnalyzer:
 
         for i, file_path in enumerate(selected_files):
             # 显示进度
-            progress = (i + 1) / total_files * 100
+            progress = (i + 1) / len(selected_files) * 100
             if progress_callback:
-                progress_callback(f"⏳ 加载进度: {progress:.1f}% ({i+1}/{total_files})")
+                progress_callback(f"⏳ 加载进度: {progress:.1f}% ({i+1}/{len(selected_files)})")
             
             # 从文件名提取股票代码
             filename = os.path.basename(file_path)
@@ -76,7 +147,7 @@ class BigTradeAnalyzer:
                 # 清理列名（去除首尾空格和特殊字符）
                 df.columns = df.columns.str.strip()
                 
-                if 'Volume' not in df.columns or 'Side' not in df.columns:
+                if 'Volume' not in df.columns or 'BuyID' not in df.columns or 'SellID' not in df.columns:
                     continue
 
                 # 转换Volume为手数（1手=100股）
@@ -146,10 +217,10 @@ class BigTradeAnalyzer:
                     progress = (processed_stocks / total_stocks) * 100
                     progress_callback(f"🔍 分析中: {market} - {stock_code} ({processed_stocks}/{total_stocks}, {progress:.1f}%)")
                 
-                # 统计大买单（Side=1 是主动买）
-                big_buys = df[(df['Side'] == 1) & (df['Volume_Hand'] >= buy_threshold)]
-                # 统计大卖单（Side=-1 或 -11 是主动卖）
-                big_sells = df[(df['Side'].isin([-1, -11])) & (df['Volume_Hand'] >= sell_threshold)]
+                # 统计大买单（SellID=0 表示是买单）
+                big_buys = df[(df['SellID'] == 0) & (df['Volume_Hand'] >= buy_threshold)]
+                # 统计大卖单（BuyID=0 表示是卖单）
+                big_sells = df[(df['BuyID'] == 0) & (df['Volume_Hand'] >= sell_threshold)]
                 
                 # 计算总成交手数
                 total_volume = df['Volume_Hand'].sum()
@@ -190,7 +261,7 @@ class BigTradeAnalyzer:
         return results
 
 class BigTradeUI:
-    def __init__(self, root):
+    def __init__(self, root, random_sample=0):
         self.root = root
         self.root.title("A股大买卖单分析系统 v2.0")
         self.root.geometry("1300x850")
@@ -229,7 +300,7 @@ class BigTradeUI:
         }
         
         # 初始化分析器
-        self.analyzer = BigTradeAnalyzer('deal_20251231')
+        self.analyzer = BigTradeAnalyzer('deal_20251231', random_sample=random_sample)
         
         # 应用样式
         self.style = ttk.Style()
@@ -617,6 +688,15 @@ class BigTradeUI:
                     ), tags=(tag,))
 
 if __name__ == "__main__":
+    import argparse
+    
+    # 创建命令行参数解析器
+    parser = argparse.ArgumentParser(description="A股大买卖单分析系统")
+    parser.add_argument("--random-sample", type=int, default=0, help="随机选取的股票总数，0表示选取所有股票")
+    
+    # 解析参数
+    args = parser.parse_args()
+    
     # 设置 DPI 感知以保证在 Windows 高分屏下不模糊
     try:
         from ctypes import windll
@@ -625,7 +705,7 @@ if __name__ == "__main__":
         pass
         
     root = tk.Tk()
-    app = BigTradeUI(root)
+    app = BigTradeUI(root, random_sample=args.random_sample)
     
     # 窗口标题美化
     root.title("A股顶级机构大单异动监控系统")
