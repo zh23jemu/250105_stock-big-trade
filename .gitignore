@@ -2,3 +2,5 @@ deal_*/
 venv/
 需求/
 find_max_hand.py
+__pycache__/big_trade_analyzer.cpython-312.pyc
+*.zip

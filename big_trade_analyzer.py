@@ -257,8 +257,9 @@ class BigTradeAnalyzer:
                 
                 # 计算大买单和大卖单的总金额（金额 = 价格 * 成交量）
                 # 注意：Volume是股数，1手=100股，所以总金额 = 价格 * Volume
-                total_big_buy_amount = (big_buys['Price'] * big_buys['Volume']).sum()
-                total_big_sell_amount = (big_sells['Price'] * big_sells['Volume']).sum()
+                # 转换为万元单位（保留两位小数）
+                total_big_buy_amount = (big_buys['Price'] * big_buys['Volume']).sum() / 10000
+                total_big_sell_amount = (big_sells['Price'] * big_sells['Volume']).sum() / 10000
                 
                 # 计算大买单和大卖单的笔数
                 count_big_buy = len(big_buys)
@@ -478,8 +479,14 @@ class BigTradeUI:
         """刷新表格的交替行颜色"""
         theme = 'dark' if self.dark_mode else 'light'
         c = self.colors[theme]
+        
+        # 交替行颜色
         tree.tag_configure('oddrow', background=c['bg'], foreground=c['fg'])
         tree.tag_configure('evenrow', background=c['row_alt'], foreground=c['fg'])
+        
+        # 金额颜色标签
+        tree.tag_configure('buy_amount', foreground=c['status_red'])  # 大买单金额红色
+        tree.tag_configure('sell_amount', foreground=c['status_green'])  # 大卖单金额绿色
 
 
     def create_widgets(self):
@@ -529,7 +536,7 @@ class BigTradeUI:
         buy_entry = ttk.Entry(grid_frame, textvariable=self.buy_threshold, width=15)
         buy_entry.grid(row=0, column=1, padx=10, pady=5)
         
-        ttk.Label(grid_frame, text="买入金额阈值 (元):").grid(row=1, column=0, padx=10, pady=5, sticky=tk.E)
+        ttk.Label(grid_frame, text="买入金额阈值 (万元):").grid(row=1, column=0, padx=10, pady=5, sticky=tk.E)
         self.buy_amount_threshold = tk.StringVar(value="0")
         buy_amount_entry = ttk.Entry(grid_frame, textvariable=self.buy_amount_threshold, width=15)
         buy_amount_entry.grid(row=1, column=1, padx=10, pady=5)
@@ -545,7 +552,7 @@ class BigTradeUI:
         sell_entry = ttk.Entry(grid_frame, textvariable=self.sell_threshold, width=15)
         sell_entry.grid(row=0, column=3, padx=10, pady=5)
         
-        ttk.Label(grid_frame, text="卖出金额阈值 (元):").grid(row=1, column=2, padx=10, pady=5, sticky=tk.E)
+        ttk.Label(grid_frame, text="卖出金额阈值 (万元):").grid(row=1, column=2, padx=10, pady=5, sticky=tk.E)
         self.sell_amount_threshold = tk.StringVar(value="0")
         sell_amount_entry = ttk.Entry(grid_frame, textvariable=self.sell_amount_threshold, width=15)
         sell_amount_entry.grid(row=1, column=3, padx=10, pady=5)
@@ -580,7 +587,7 @@ class BigTradeUI:
             table_container.pack(fill=tk.BOTH, expand=True)
             
             # 创建表格
-            columns = ('股票代码', '股票名称', '大买单笔数', '大买单总手数', '大买单总金额', '大卖单笔数', '大卖单总手数', '大卖单总金额', '总成交手数', '大单买卖比')
+            columns = ('股票代码', '股票名称', '大买单笔数', '大买单总手数', '大买单总金额', '大卖单笔数', '大卖单总手数', '大卖单总金额', '总成交手数', '大单总额', '大单净额', '大单买卖比')
             tree = ttk.Treeview(table_container, columns=columns, show='headings', selectmode='browse')
             
             # 设置列宽和对齐方式
@@ -593,6 +600,8 @@ class BigTradeUI:
             tree.column('大卖单总手数', width=150, anchor=tk.CENTER)
             tree.column('大卖单总金额', width=180, anchor=tk.CENTER)
             tree.column('总成交手数', width=150, anchor=tk.CENTER)
+            tree.column('大单总额', width=150, anchor=tk.CENTER)
+            tree.column('大单净额', width=150, anchor=tk.CENTER)
             tree.column('大单买卖比', width=120, anchor=tk.CENTER)
             
             # 设置列标题
@@ -616,8 +625,8 @@ class BigTradeUI:
         
         # 尝试转换为数字进行排序
         try:
-            # 处理数值字符串：移除千分位分隔符和百分号
-            l.sort(key=lambda t: float(t[0].replace(',', '').replace('%', '')), reverse=reverse)
+            # 处理数值字符串：移除千分位分隔符、百分号和万元单位
+            l.sort(key=lambda t: float(t[0].replace(',', '').replace('%', '').replace('万元', '')), reverse=reverse)
         except ValueError:
             # 回退到字符串排序
             l.sort(reverse=reverse)
@@ -688,9 +697,9 @@ class BigTradeUI:
             def analyze_thread():
                 """分析线程"""
                 try:
-                    # 获取金额阈值
-                    buy_amount_threshold = float(self.buy_amount_threshold.get())
-                    sell_amount_threshold = float(self.sell_amount_threshold.get())
+                    # 获取金额阈值（万元）并转换为元
+                    buy_amount_threshold = float(self.buy_amount_threshold.get()) * 10000
+                    sell_amount_threshold = float(self.sell_amount_threshold.get()) * 10000
                     
                     # 获取逻辑关系
                     buy_logic = self.buy_logic.get()
@@ -748,6 +757,10 @@ class BigTradeUI:
                     elif stock['大买单总金额'] > 0:
                         ratio = "∞"
                     
+                    # 计算大单总额和大单净额
+                    total_amount = stock['大买单总金额'] + stock['大卖单总金额']
+                    net_amount = stock['大买单总金额'] - stock['大卖单总金额']
+                    
                     tag = 'evenrow' if i % 2 == 0 else 'oddrow'
                     
                     # 插入主节点（股票汇总信息）
@@ -756,43 +769,65 @@ class BigTradeUI:
                         stock['股票名称'],
                         stock['大买单笔数'],
                         f"{stock['大买单总手数']:,.0f}",
-                        f"{stock['大买单总金额']:,.0f}",
+                        f"{stock['大买单总金额']:,.0f}万元",
                         stock['大卖单笔数'],
                         f"{stock['大卖单总手数']:,.0f}",
-                        f"{stock['大卖单总金额']:,.0f}",
+                        f"{stock['大卖单总金额']:,.0f}万元",
                         f"{stock['总成交手数']:,.0f}",
+                        f"{total_amount:,.0f}万元",
+                        f"{net_amount:,.0f}万元",
                         ratio
-                    ), tags=(tag,))
+                    ), tags=(tag, 'buy_amount', 'sell_amount'))
                     
                     # 插入子节点（详细买单）
                     if stock['big_trades']['buys']:
                         # 买单汇总节点
                         buy_summary_item = tree.insert(main_item, tk.END, values=(
-                            '', '买单详情', f"共{len(stock['big_trades']['buys'])}笔", '', '', '', '', '', '', ''
+                            '', '买单详情', f"共{len(stock['big_trades']['buys'])}笔", '', '', '', '', '', '', '', '', ''
                         ), tags=('buy_summary',))
                         
                         # 买单明细节点
                         for trade in stock['big_trades']['buys']:
+                            # 计算交易金额（万元）
+                            trade_amount = (trade['Price'] * trade['Volume']) / 10000
                             tree.insert(buy_summary_item, tk.END, values=(
                                 '', f"{trade['DealTime']}", f"手数: {trade['Volume_Hand']:.0f}", 
-                                f"价格: {trade['Price']:.2f}", f"金额: {(trade['Price'] * trade['Volume']):,.0f}", 
-                                '', '', '', '', ''
-                            ), tags=('trade_detail',))
+                                f"价格: {trade['Price']:.2f}", f"金额: {trade_amount:,.0f}万元", 
+                                '', '', '', '', '', '', ''
+                            ), tags=('trade_detail', 'buy_amount'))
                     
                     # 插入子节点（详细卖单）
                     if stock['big_trades']['sells']:
                         # 卖单汇总节点
                         sell_summary_item = tree.insert(main_item, tk.END, values=(
-                            '', '卖单详情', f"共{len(stock['big_trades']['sells'])}笔", '', '', '', '', '', '', ''
+                            '', '卖单详情', f"共{len(stock['big_trades']['sells'])}笔", '', '', '', '', '', '', '', '', ''
                         ), tags=('sell_summary',))
                         
                         # 卖单明细节点
                         for trade in stock['big_trades']['sells']:
+                            # 计算交易金额（万元）
+                            trade_amount = (trade['Price'] * trade['Volume']) / 10000
                             tree.insert(sell_summary_item, tk.END, values=(
                                 '', f"{trade['DealTime']}", f"手数: {trade['Volume_Hand']:.0f}", 
-                                f"价格: {trade['Price']:.2f}", f"金额: {(trade['Price'] * trade['Volume']):,.0f}", 
-                                '', '', '', '', ''
-                            ), tags=('trade_detail',))
+                                f"价格: {trade['Price']:.2f}", f"金额: {trade_amount:,.0f}万元", 
+                                '', '', '', '', '', '', ''
+                            ), tags=('trade_detail', 'sell_amount'))
+                    
+                    # 设置主节点的交替行颜色
+                    tree.item(main_item, tags=(tag,))
+                    
+                    # 获取当前主题的颜色配置
+                    theme = 'dark' if self.dark_mode else 'light'
+                    c = self.colors[theme]
+                    
+                    # 为大买单总金额和大卖单总金额列应用颜色
+                    # 注意：Treeview的标签是应用于整行的，我们需要创建一个自定义渲染方法来为单个单元格着色
+                    # 这里我们使用一个技巧：将大买单和大卖单金额分别放在不同的行中，或者使用自定义标签
+                    # 由于Treeview的限制，我们只能通过修改单元格的文本颜色来实现
+                    # 这里我们将使用tag_configure来设置颜色，并在insert时应用标签
+                    
+                    # 重新配置tree的标签，确保颜色正确
+                    self.refresh_tree_tags(tree)
 
 if __name__ == "__main__":
     import argparse
