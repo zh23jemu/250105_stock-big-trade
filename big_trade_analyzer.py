@@ -10,8 +10,8 @@ import akshare as ak
 
 # 定义常量
 MARKET_MAP = {
-    '沪市': lambda code: code.startswith('6') and not code.startswith('688'),
-    '科创板': lambda code: code.startswith('688'),
+    '沪市': lambda code: code.startswith('6') and not code.startswith('68'),
+    '科创板': lambda code: code.startswith('68'),
     '深市': lambda code: code.startswith('000'),
     '创业板': lambda code: code.startswith('300') or code.startswith('301')
 }
@@ -61,7 +61,7 @@ class BigTradeAnalyzer:
             stock_code = parts[-1]
             
             # 分类到不同市场
-            if stock_code.startswith('688'):
+            if stock_code.startswith('68'):
                 market_files['科创板'].append(file_path)
             elif stock_code.startswith('6'):
                 market_files['沪市主板'].append(file_path)
@@ -157,7 +157,7 @@ class BigTradeAnalyzer:
                 self.stock_data[stock_code] = df
                 
                 # 分类到不同市场
-                if stock_code.startswith('688'):
+                if stock_code.startswith('68'):
                     self.market_data['科创板'][stock_code] = df
                 elif stock_code.startswith('6'):
                     self.market_data['沪市主板'][stock_code] = df
