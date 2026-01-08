@@ -616,8 +616,10 @@ class BigTradeUI:
         
         # 尝试转换为数字进行排序
         try:
-            l.sort(key=lambda t: float(t[0].replace('%', '')), reverse=reverse)
+            # 处理数值字符串：移除千分位分隔符和百分号
+            l.sort(key=lambda t: float(t[0].replace(',', '').replace('%', '')), reverse=reverse)
         except ValueError:
+            # 回退到字符串排序
             l.sort(reverse=reverse)
 
         for index, (val, k) in enumerate(l):
