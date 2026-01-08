@@ -147,9 +147,12 @@ class BigTradeAnalyzer:
                 # 清理列名（去除首尾空格和特殊字符）
                 df.columns = df.columns.str.strip()
                 
-                if 'Volume' not in df.columns or 'BuyID' not in df.columns or 'SellID' not in df.columns:
+                if 'Volume' not in df.columns or 'Side' not in df.columns or 'Price' not in df.columns:
                     continue
 
+                # 修正Price值：除以100，保留两位小数
+                df['Price'] = (df['Price'] / 100).round(2)
+                
                 # 转换Volume为手数（1手=100股）
                 df['Volume_Hand'] = df['Volume'] / 100
                 
@@ -198,7 +201,8 @@ class BigTradeAnalyzer:
             print(f"获取股票名称失败: {e}")
             return stock_code
     
-    def analyze_big_trades(self, buy_threshold, sell_threshold, progress_callback=None):
+    def analyze_big_trades(self, buy_threshold, sell_threshold, buy_amount_threshold=0, sell_amount_threshold=0, 
+                          buy_logic='不选', sell_logic='不选', progress_callback=None):
         """分析大买卖单"""
         results = {}
         
@@ -217,10 +221,32 @@ class BigTradeAnalyzer:
                     progress = (processed_stocks / total_stocks) * 100
                     progress_callback(f"🔍 分析中: {market} - {stock_code} ({processed_stocks}/{total_stocks}, {progress:.1f}%)")
                 
-                # 统计大买单（SellID=0 表示是买单）
-                big_buys = df[(df['SellID'] == 0) & (df['Volume_Hand'] >= buy_threshold)]
-                # 统计大卖单（BuyID=0 表示是卖单）
-                big_sells = df[(df['BuyID'] == 0) & (df['Volume_Hand'] >= sell_threshold)]
+                # 计算每笔交易的金额
+                df['Amount'] = df['Price'] * df['Volume']
+                
+                # 统计大买单（Side=0 表示主动买入）
+                buy_mask = (df['Side'] == 0)
+                
+                if buy_logic == '与and':
+                    buy_mask &= (df['Volume_Hand'] >= buy_threshold) & (df['Amount'] >= buy_amount_threshold)
+                elif buy_logic == '或or':
+                    buy_mask &= ((df['Volume_Hand'] >= buy_threshold) | (df['Amount'] >= buy_amount_threshold))
+                elif buy_logic == '不选':
+                    buy_mask &= (df['Volume_Hand'] >= buy_threshold)
+                
+                big_buys = df[buy_mask]
+                
+                # 统计大卖单（Side=1 表示主动卖出）
+                sell_mask = (df['Side'] == 1)
+                
+                if sell_logic == '与and':
+                    sell_mask &= (df['Volume_Hand'] >= sell_threshold) & (df['Amount'] >= sell_amount_threshold)
+                elif sell_logic == '或or':
+                    sell_mask &= ((df['Volume_Hand'] >= sell_threshold) | (df['Amount'] >= sell_amount_threshold))
+                elif sell_logic == '不选':
+                    sell_mask &= (df['Volume_Hand'] >= sell_threshold)
+                
+                big_sells = df[sell_mask]
                 
                 # 计算总成交手数
                 total_volume = df['Volume_Hand'].sum()
@@ -497,18 +523,40 @@ class BigTradeUI:
         grid_frame = ttk.Frame(params_frame)
         grid_frame.pack(expand=True)
         
+        # 买入参数设置
         ttk.Label(grid_frame, text="买入阈值 (手):").grid(row=0, column=0, padx=10, pady=5, sticky=tk.E)
         self.buy_threshold = tk.StringVar(value="5000")
         buy_entry = ttk.Entry(grid_frame, textvariable=self.buy_threshold, width=15)
         buy_entry.grid(row=0, column=1, padx=10, pady=5)
         
+        ttk.Label(grid_frame, text="买入金额阈值 (元):").grid(row=1, column=0, padx=10, pady=5, sticky=tk.E)
+        self.buy_amount_threshold = tk.StringVar(value="0")
+        buy_amount_entry = ttk.Entry(grid_frame, textvariable=self.buy_amount_threshold, width=15)
+        buy_amount_entry.grid(row=1, column=1, padx=10, pady=5)
+        
+        ttk.Label(grid_frame, text="买入条件关系:").grid(row=2, column=0, padx=10, pady=5, sticky=tk.E)
+        self.buy_logic = tk.StringVar(value="不选")
+        buy_logic_combo = ttk.Combobox(grid_frame, textvariable=self.buy_logic, values=["不选", "与and", "或or"], width=13, state="readonly")
+        buy_logic_combo.grid(row=2, column=1, padx=10, pady=5)
+        
+        # 卖出参数设置
         ttk.Label(grid_frame, text="卖出阈值 (手):").grid(row=0, column=2, padx=10, pady=5, sticky=tk.E)
         self.sell_threshold = tk.StringVar(value="5000")
         sell_entry = ttk.Entry(grid_frame, textvariable=self.sell_threshold, width=15)
         sell_entry.grid(row=0, column=3, padx=10, pady=5)
         
+        ttk.Label(grid_frame, text="卖出金额阈值 (元):").grid(row=1, column=2, padx=10, pady=5, sticky=tk.E)
+        self.sell_amount_threshold = tk.StringVar(value="0")
+        sell_amount_entry = ttk.Entry(grid_frame, textvariable=self.sell_amount_threshold, width=15)
+        sell_amount_entry.grid(row=1, column=3, padx=10, pady=5)
+        
+        ttk.Label(grid_frame, text="卖出条件关系:").grid(row=2, column=2, padx=10, pady=5, sticky=tk.E)
+        self.sell_logic = tk.StringVar(value="不选")
+        sell_logic_combo = ttk.Combobox(grid_frame, textvariable=self.sell_logic, values=["不选", "与and", "或or"], width=13, state="readonly")
+        sell_logic_combo.grid(row=2, column=3, padx=10, pady=5)
+        
         self.analyze_btn = ttk.Button(grid_frame, text="🚀 开始扫描分析", command=self.analyze_data, style="Accent.TButton")
-        self.analyze_btn.grid(row=0, column=4, padx=20, pady=5)
+        self.analyze_btn.grid(row=1, column=4, padx=20, pady=5, rowspan=2)
         
         # 结果显示区域
         result_frame = ttk.LabelFrame(self.main_frame, text="多维度分析结果", padding="5")
@@ -638,8 +686,24 @@ class BigTradeUI:
             def analyze_thread():
                 """分析线程"""
                 try:
-                    results = self.analyzer.analyze_big_trades(buy_threshold, sell_threshold, progress_callback=self.update_status)
+                    # 获取金额阈值
+                    buy_amount_threshold = float(self.buy_amount_threshold.get())
+                    sell_amount_threshold = float(self.sell_amount_threshold.get())
+                    
+                    # 获取逻辑关系
+                    buy_logic = self.buy_logic.get()
+                    sell_logic = self.sell_logic.get()
+                    
+                    results = self.analyzer.analyze_big_trades(
+                        buy_threshold, sell_threshold, 
+                        buy_amount_threshold, sell_amount_threshold,
+                        buy_logic, sell_logic,
+                        progress_callback=self.update_status
+                    )
                     self.root.after(0, lambda: self.on_analyze_complete(results, buy_threshold, sell_threshold))
+                except ValueError as e:
+                    self.root.after(0, lambda: self.update_status(f"⚠️ 参数错误: {e}"))
+                    self.root.after(0, self.on_analyze_error)
                 except Exception as e:
                     self.root.after(0, lambda: self.update_status(f"⚠️ 分析出错: {e}"))
                     self.root.after(0, self.on_analyze_error)
@@ -690,10 +754,10 @@ class BigTradeUI:
                         stock['股票名称'],
                         stock['大买单笔数'],
                         f"{stock['大买单总手数']:,.0f}",
-                        f"{stock['大买单总金额']:,.2f}",
+                        f"{stock['大买单总金额']:,.0f}",
                         stock['大卖单笔数'],
                         f"{stock['大卖单总手数']:,.0f}",
-                        f"{stock['大卖单总金额']:,.2f}",
+                        f"{stock['大卖单总金额']:,.0f}",
                         f"{stock['总成交手数']:,.0f}",
                         ratio
                     ), tags=(tag,))
@@ -708,8 +772,8 @@ class BigTradeUI:
                         # 买单明细节点
                         for trade in stock['big_trades']['buys']:
                             tree.insert(buy_summary_item, tk.END, values=(
-                                '', f"{trade['DealTime']}", f"手数: {trade['Volume_Hand']:.2f}", 
-                                f"价格: {trade['Price']:.2f}", f"金额: {(trade['Price'] * trade['Volume']):,.2f}", 
+                                '', f"{trade['DealTime']}", f"手数: {trade['Volume_Hand']:.0f}", 
+                                f"价格: {trade['Price']:.2f}", f"金额: {(trade['Price'] * trade['Volume']):,.0f}", 
                                 '', '', '', '', ''
                             ), tags=('trade_detail',))
                     
@@ -723,8 +787,8 @@ class BigTradeUI:
                         # 卖单明细节点
                         for trade in stock['big_trades']['sells']:
                             tree.insert(sell_summary_item, tk.END, values=(
-                                '', f"{trade['DealTime']}", f"手数: {trade['Volume_Hand']:.2f}", 
-                                f"价格: {trade['Price']:.2f}", f"金额: {(trade['Price'] * trade['Volume']):,.2f}", 
+                                '', f"{trade['DealTime']}", f"手数: {trade['Volume_Hand']:.0f}", 
+                                f"价格: {trade['Price']:.2f}", f"金额: {(trade['Price'] * trade['Volume']):,.0f}", 
                                 '', '', '', '', ''
                             ), tags=('trade_detail',))
 
