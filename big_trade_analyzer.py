@@ -38,7 +38,7 @@ class BigTradeAnalyzer:
         self.load_stock_names_from_db()
     
     def init_database(self):
-        """初始化数据库，创建股票名称表"""
+        """初始化数据库，创建股票名称表和自选股表"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
@@ -48,6 +48,17 @@ class BigTradeAnalyzer:
                 code TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
                 update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # 创建自选股表
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS portfolios (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                portfolio_name TEXT NOT NULL,
+                stock_code TEXT NOT NULL,
+                FOREIGN KEY (stock_code) REFERENCES stock_names(code),
+                UNIQUE(portfolio_name, stock_code)
             )
         ''')
         
@@ -67,6 +78,58 @@ class BigTradeAnalyzer:
             self.stock_name_cache[code] = name
         
         conn.close()
+    
+    def import_portfolio(self, portfolio_name, file_path):
+        """从txt文件导入自选股到数据库"""
+        try:
+            # 读取txt文件，每一行是一个股票代码
+            with open(file_path, 'r', encoding='utf-8') as f:
+                stock_codes = [line.strip() for line in f if line.strip()]
+            
+            # 确保代码是6位数字
+            stock_codes = [code[-6:] if len(code) > 6 else code for code in stock_codes]
+            
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # 清空该自选股组的旧数据
+            cursor.execute('DELETE FROM portfolios WHERE portfolio_name = ?', (portfolio_name,))
+            
+            # 插入新数据
+            for code in stock_codes:
+                cursor.execute('INSERT OR IGNORE INTO portfolios (portfolio_name, stock_code) VALUES (?, ?)', (portfolio_name, code))
+            
+            conn.commit()
+            conn.close()
+            
+            return True, f"成功导入{len(stock_codes)}只股票到{portfolio_name}"
+        except Exception as e:
+            return False, f"导入失败: {e}"
+    
+    def get_portfolio_stocks(self, portfolio_name):
+        """从数据库获取自选股列表"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT p.stock_code, s.name 
+            FROM portfolios p 
+            LEFT JOIN stock_names s ON p.stock_code = s.code 
+            WHERE p.portfolio_name = ?
+        ''', (portfolio_name,))
+        
+        stocks = cursor.fetchall()
+        conn.close()
+        
+        # 转换为列表，确保名称不为空
+        result = []
+        for code, name in stocks:
+            result.append({
+                '股票代码': code,
+                '股票名称': name if name else code
+            })
+        
+        return result
     
     def load_data(self, progress_callback=None):
         """加载股票数据，支持按市场类型随机选取"""
@@ -565,22 +628,66 @@ class BigTradeUI:
     def import_portfolio(self):
         """导入自选股"""
         try:
-            # 这里可以实现导入逻辑，例如从文件读取自选股列表
+            # 获取选择的自选股组
             portfolio = self.selected_portfolio.get()
+            
+            # 创建文件选择对话框
+            from tkinter import filedialog
+            file_path = filedialog.askopenfilename(
+                title="选择自选股文件",
+                filetypes=[("文本文件", "*.txt"), ("所有文件", "*.*")]
+            )
+            
+            if not file_path:
+                return  # 用户取消选择
+            
             self.update_status(f"📥 开始导入{portfolio}...")
-            # 这里可以添加文件选择对话框和导入逻辑
-            self.update_status(f"✅ {portfolio}导入成功")
+            
+            # 调用分析器的导入方法
+            success, message = self.analyzer.import_portfolio(portfolio, file_path)
+            
+            if success:
+                self.update_status(f"✅ {message}")
+                # 更新自选股标签页显示
+                self.refresh_portfolio_display()
+            else:
+                self.update_status(f"⚠️ {message}")
         except Exception as e:
             self.update_status(f"⚠️ 导入失败: {e}")
     
     def export_portfolio(self):
-        """导出自选股"""
+        """导出自选股到txt文件"""
         try:
-            # 这里可以实现导出逻辑，例如将自选股列表保存到文件
+            # 获取选择的自选股组
             portfolio = self.selected_portfolio.get()
+            
+            # 获取自选股列表
+            stocks = self.analyzer.get_portfolio_stocks(portfolio)
+            
+            if not stocks:
+                self.update_status(f"⚠️ {portfolio}中没有股票可导出")
+                return
+            
+            # 创建文件保存对话框
+            from tkinter import filedialog
+            file_path = filedialog.asksaveasfilename(
+                title="保存自选股文件",
+                defaultextension=".txt",
+                filetypes=[("文本文件", "*.txt"), ("所有文件", "*.*")],
+                initialfile=f"{portfolio}.txt"
+            )
+            
+            if not file_path:
+                return  # 用户取消选择
+            
             self.update_status(f"📤 开始导出{portfolio}...")
-            # 这里可以添加文件选择对话框和导出逻辑
-            self.update_status(f"✅ {portfolio}导出成功")
+            
+            # 将股票代码写入txt文件，一行一个
+            with open(file_path, 'w', encoding='utf-8') as f:
+                for stock in stocks:
+                    f.write(f"{stock['股票代码']}\n")
+            
+            self.update_status(f"✅ {portfolio}导出成功，共{len(stocks)}只股票")
         except Exception as e:
             self.update_status(f"⚠️ 导出失败: {e}")
     
@@ -594,11 +701,39 @@ class BigTradeUI:
             success = self.analyzer.update_stock_names(progress_callback=self.update_status)
             # 更新按钮状态
             self.root.after(0, lambda: self.update_names_btn.config(state=tk.NORMAL))
+            # 更新自选股标签页显示
+            self.root.after(0, self.refresh_portfolio_display)
         
         # 启动后台线程
         thread = threading.Thread(target=update_thread)
         thread.daemon = True
         thread.start()
+    
+    def refresh_portfolio_display(self):
+        """刷新自选股标签页显示"""
+        try:
+            for portfolio_name in ["自选1", "自选2", "自选3"]:
+                # 获取自选股列表
+                stocks = self.analyzer.get_portfolio_stocks(portfolio_name)
+                
+                # 如果表格存在，更新显示
+                if portfolio_name in self.tables:
+                    tree = self.tables[portfolio_name]
+                    # 清空表格
+                    for item in tree.get_children():
+                        tree.delete(item)
+                    
+                    # 添加自选股数据
+                    for i, stock in enumerate(stocks):
+                        tag = 'evenrow' if i % 2 == 0 else 'oddrow'
+                        # 插入主节点（股票信息）
+                        tree.insert('', tk.END, values=(
+                            stock['股票代码'],
+                            stock['股票名称'],
+                            '', '', '', '', '', '', '', '', '', ''
+                        ), tags=(tag,))
+        except Exception as e:
+            self.update_status(f"⚠️ 刷新自选股显示失败: {e}")
 
     def refresh_tree_tags(self, tree):
         """刷新表格的交替行颜色"""
@@ -764,6 +899,9 @@ class BigTradeUI:
             # 保存表格引用
             self.tables[market_name] = tree
             self.refresh_tree_tags(tree)
+        
+        # 创建完所有表格后，加载自选股数据
+        self.refresh_portfolio_display()
 
     def sort_column(self, tree, col, reverse):
         """表格点击标题排序"""

@@ -4,3 +4,5 @@ venv/
 find_max_hand.py
 __pycache__/big_trade_analyzer.cpython-312.pyc
 *.zip
+*.db
+*.txt
