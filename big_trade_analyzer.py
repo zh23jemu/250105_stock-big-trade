@@ -7,6 +7,7 @@ from tkinter import ttk
 import threading
 from datetime import datetime
 import akshare as ak
+import sqlite3
 
 # 定义常量
 MARKET_MAP = {
@@ -30,6 +31,42 @@ class BigTradeAnalyzer:
         self.stock_name_cache = {}  # 股票名称缓存，避免重复请求
         self.is_loaded = False
         self.random_sample = random_sample  # 随机选取的股票总数，0表示选取所有股票
+        
+        # 初始化SQLite数据库
+        self.db_path = 'stock_names.db'
+        self.init_database()
+        self.load_stock_names_from_db()
+    
+    def init_database(self):
+        """初始化数据库，创建股票名称表"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # 创建股票名称表
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS stock_names (
+                code TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        conn.commit()
+        conn.close()
+    
+    def load_stock_names_from_db(self):
+        """从数据库加载股票名称到缓存"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT code, name FROM stock_names')
+        rows = cursor.fetchall()
+        
+        # 更新缓存
+        for code, name in rows:
+            self.stock_name_cache[code] = name
+        
+        conn.close()
     
     def load_data(self, progress_callback=None):
         """加载股票数据，支持按市场类型随机选取"""
@@ -181,25 +218,75 @@ class BigTradeAnalyzer:
         self.is_loaded = True
     
     def get_stock_name(self, stock_code):
-        """使用akshare获取股票名称，带缓存"""
+        """从缓存或数据库获取股票名称，只使用6位数字代码"""
+        # 确保使用6位数字代码
+        stock_code = stock_code[-6:] if len(stock_code) > 6 else stock_code
+        
+        # 优先从缓存获取
         if stock_code in self.stock_name_cache:
             return self.stock_name_cache[stock_code]
         
+        # 从数据库获取
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute('SELECT name FROM stock_names WHERE code = ?', (stock_code,))
+        result = cursor.fetchone()
+        conn.close()
+        
+        if result:
+            name = result[0]
+            self.stock_name_cache[stock_code] = name
+            return name
+        
+        # 如果数据库中没有，返回代码
+        return stock_code
+    
+    def update_stock_names(self, progress_callback=None):
+        """更新A股股票名称到数据库"""
         try:
+            if progress_callback:
+                progress_callback("🔄 开始更新A股股票名称...")
+            
             # 使用akshare获取所有A股代码和名称
             stock_info = ak.stock_info_a_code_name()
-            # 将DataFrame转换为字典，方便查找
-            stock_dict = dict(zip(stock_info['code'], stock_info['name']))
+            
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # 清空旧数据
+            cursor.execute('DELETE FROM stock_names')
+            
+            # 批量插入新数据
+            stocks = []
+            for index, row in stock_info.iterrows():
+                # 确保代码是6位数字
+                code = row['code'][-6:] if len(row['code']) > 6 else row['code']
+                name = row['name']
+                stocks.append((code, name))
+                
+                # 更新进度
+                if progress_callback and index % 100 == 0:
+                    progress = (index + 1) / len(stock_info) * 100
+                    progress_callback(f"🔄 更新中: {progress:.1f}% ({index+1}/{len(stock_info)})")
+            
+            # 批量插入
+            cursor.executemany('INSERT OR REPLACE INTO stock_names (code, name) VALUES (?, ?)', stocks)
+            conn.commit()
+            conn.close()
             
             # 更新缓存
-            self.stock_name_cache = stock_dict
+            self.load_stock_names_from_db()
             
-            # 获取当前股票名称
-            stock_name = stock_dict.get(stock_code, stock_code)
-            return stock_name
+            if progress_callback:
+                progress_callback(f"✅ A股股票名称更新完成，共 {len(stock_info)} 只股票")
+            
+            return True
         except Exception as e:
-            print(f"获取股票名称失败: {e}")
-            return stock_code
+            error_msg = f"⚠️ 更新A股股票名称失败: {e}"
+            if progress_callback:
+                progress_callback(error_msg)
+            print(error_msg)
+            return False
     
     def analyze_big_trades(self, buy_threshold, sell_threshold, buy_amount_threshold=0, sell_amount_threshold=0, 
                           buy_logic='不选', sell_logic='不选', progress_callback=None):
@@ -496,6 +583,22 @@ class BigTradeUI:
             self.update_status(f"✅ {portfolio}导出成功")
         except Exception as e:
             self.update_status(f"⚠️ 导出失败: {e}")
+    
+    def update_stock_names(self):
+        """更新A股股票名称（后台线程）"""
+        # 禁用按钮防止重复点击
+        self.update_names_btn.config(state=tk.DISABLED)
+        
+        def update_thread():
+            """更新股票名称的线程函数"""
+            success = self.analyzer.update_stock_names(progress_callback=self.update_status)
+            # 更新按钮状态
+            self.root.after(0, lambda: self.update_names_btn.config(state=tk.NORMAL))
+        
+        # 启动后台线程
+        thread = threading.Thread(target=update_thread)
+        thread.daemon = True
+        thread.start()
 
     def refresh_tree_tags(self, tree):
         """刷新表格的交替行颜色"""
@@ -540,6 +643,10 @@ class BigTradeUI:
         
         self.load_btn = ttk.Button(load_frame, text="📂 加载原始成交数据", command=self.load_data, style="Accent.TButton")
         self.load_btn.pack(pady=5)
+        
+        # 更新A股股票名称按钮
+        self.update_names_btn = ttk.Button(load_frame, text="📋 更新A股股票名称", command=self.update_stock_names)
+        self.update_names_btn.pack(pady=5)
         
         self.status_var = tk.StringVar(value="准备就绪")
         self.status_label = ttk.Label(load_frame, textvariable=self.status_var, wraplength=200)
