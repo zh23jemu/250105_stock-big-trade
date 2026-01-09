@@ -474,6 +474,28 @@ class BigTradeUI:
         self.dark_mode = not self.dark_mode
         self.theme_btn.config(text="🌙 深色模式" if not self.dark_mode else "☀️ 浅色模式")
         self.update_theme_colors()
+    
+    def import_portfolio(self):
+        """导入自选股"""
+        try:
+            # 这里可以实现导入逻辑，例如从文件读取自选股列表
+            portfolio = self.selected_portfolio.get()
+            self.update_status(f"📥 开始导入{portfolio}...")
+            # 这里可以添加文件选择对话框和导入逻辑
+            self.update_status(f"✅ {portfolio}导入成功")
+        except Exception as e:
+            self.update_status(f"⚠️ 导入失败: {e}")
+    
+    def export_portfolio(self):
+        """导出自选股"""
+        try:
+            # 这里可以实现导出逻辑，例如将自选股列表保存到文件
+            portfolio = self.selected_portfolio.get()
+            self.update_status(f"📤 开始导出{portfolio}...")
+            # 这里可以添加文件选择对话框和导出逻辑
+            self.update_status(f"✅ {portfolio}导出成功")
+        except Exception as e:
+            self.update_status(f"⚠️ 导出失败: {e}")
 
     def refresh_tree_tags(self, tree):
         """刷新表格的交替行颜色"""
@@ -564,6 +586,23 @@ class BigTradeUI:
         
         self.analyze_btn = ttk.Button(grid_frame, text="🚀 开始扫描分析", command=self.analyze_data, style="Accent.TButton")
         self.analyze_btn.grid(row=1, column=4, padx=20, pady=5, rowspan=2)
+        
+        # 自选股操作面板
+        portfolio_frame = ttk.LabelFrame(top_panels, text="自选股操作", padding="15")
+        portfolio_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(10, 0))
+        
+        # 选择自选几
+        self.selected_portfolio = tk.StringVar(value="自选1")
+        portfolio_combo = ttk.Combobox(portfolio_frame, textvariable=self.selected_portfolio, values=["自选1", "自选2", "自选3"], width=15, state="readonly")
+        portfolio_combo.pack(pady=(0, 10))
+        
+        # 导入按钮
+        import_btn = ttk.Button(portfolio_frame, text="📥 导入自选股", command=self.import_portfolio)
+        import_btn.pack(pady=5, fill=tk.X)
+        
+        # 导出按钮
+        export_btn = ttk.Button(portfolio_frame, text="📤 导出自选股", command=self.export_portfolio)
+        export_btn.pack(pady=5, fill=tk.X)
         
         # 结果显示区域
         result_frame = ttk.LabelFrame(self.main_frame, text="多维度分析结果", padding="5")
