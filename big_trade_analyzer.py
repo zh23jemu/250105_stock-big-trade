@@ -145,6 +145,20 @@ class BigTradeAnalyzer:
             if progress_callback:
                 progress_callback(f"错误: 在 {self.data_dir} 中未找到 CSV 文件")
             return
+        
+        # 提取成交数据日期（从文件名中获取，假设格式为deal_20251231_000882.csv）
+        self.trade_date = "未知"
+        if csv_files:
+            # 从第一个文件中提取日期
+            first_file = os.path.basename(csv_files[0])
+            parts = first_file.replace('.csv', '').split('_')
+            if len(parts) >= 2 and len(parts[1]) == 8:
+                try:
+                    # 转换为YYYY-MM-DD格式
+                    date_str = parts[1]
+                    self.trade_date = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
+                except:
+                    self.trade_date = parts[1] if len(parts) >= 2 else "未知"
 
         # 按市场类型分类股票文件
         market_files = {
@@ -613,6 +627,8 @@ class BigTradeUI:
             self.title_label.configure(bg=c['bg'], fg=c['accent'])
         if hasattr(self, 'status_label'):
             self.status_label.configure(foreground=c['status_blue'] if self.dark_mode else c['accent'])
+        if hasattr(self, 'trade_date_label'):
+            self.trade_date_label.configure(bg=c['bg'], fg=c['status_green'])
         
         # 刷新所有表格标签颜色
         if hasattr(self, 'tables'):
@@ -764,6 +780,14 @@ class BigTradeUI:
                              bg=self.colors['dark']['bg'], fg=self.colors['dark']['accent'])
         title_label.pack(side=tk.LEFT)
         self.title_label = title_label # 保存引用以便更新颜色
+        
+        # 成交数据日期显示
+        self.trade_date_var = tk.StringVar(value="")
+        trade_date_label = tk.Label(header_frame, textvariable=self.trade_date_var, 
+                                  font=("Microsoft YaHei", 16, "bold"), 
+                                  bg=self.colors['dark']['bg'], fg=self.colors['dark']['status_green'])
+        trade_date_label.pack(side=tk.LEFT, padx=(20, 0))
+        self.trade_date_label = trade_date_label # 保存引用以便更新颜色
         
         self.theme_btn = ttk.Button(header_frame, text="☀️ 浅色模式", command=self.toggle_theme)
         self.theme_btn.pack(side=tk.RIGHT)
@@ -933,7 +957,21 @@ class BigTradeUI:
             for item in tree.get_children():
                 tree.delete(item)
         
+        # 让用户选择数据文件夹
+        from tkinter import filedialog
+        data_dir = filedialog.askdirectory(
+            title="选择成交数据文件夹",
+            initialdir="."
+        )
+        
+        if not data_dir:
+            self.load_btn.config(state=tk.NORMAL)
+            self.analyze_btn.config(state=tk.NORMAL)
+            return  # 用户取消选择
+        
         def load_thread():
+            # 更新analyzer的数据目录
+            self.analyzer.data_dir = data_dir
             self.analyzer.load_data(progress_callback=self.update_status)
             self.root.after(0, self.on_load_complete)
         
@@ -946,6 +984,9 @@ class BigTradeUI:
         self.load_btn.config(state=tk.NORMAL)
         self.analyze_btn.config(state=tk.NORMAL)
         if self.analyzer.is_loaded:
+            # 显示成交数据日期
+            if hasattr(self.analyzer, 'trade_date'):
+                self.trade_date_var.set(f"📅 成交数据日期: {self.analyzer.trade_date}")
             self.status_var.set("✅ 数据就绪，可以开始分析")
     
     def update_status(self, message):
