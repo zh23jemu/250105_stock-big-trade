@@ -763,6 +763,111 @@ class BigTradeUI:
         # 金额颜色标签
         tree.tag_configure('buy_amount', foreground=c['status_red'])  # 大买单金额红色
         tree.tag_configure('sell_amount', foreground=c['status_green'])  # 大卖单金额绿色
+    
+    def update_portfolio_with_analysis(self, results):
+        """将分析结果与自选股数据合并显示"""
+        try:
+            # 构建分析结果字典，以股票代码为键
+            analysis_dict = {}
+            for market_results in results.values():
+                for stock in market_results:
+                    analysis_dict[stock['股票代码']] = stock
+            
+            # 遍历所有自选股组
+            for portfolio_name in ["自选1", "自选2", "自选3"]:
+                # 获取自选股列表
+                portfolio_stocks = self.analyzer.get_portfolio_stocks(portfolio_name)
+                
+                # 如果表格存在，更新显示
+                if portfolio_name in self.tables:
+                    tree = self.tables[portfolio_name]
+                    # 清空表格
+                    for item in tree.get_children():
+                        tree.delete(item)
+                    
+                    # 添加自选股数据，合并分析结果
+                    for i, portfolio_stock in enumerate(portfolio_stocks):
+                        stock_code = portfolio_stock['股票代码']
+                        stock_name = portfolio_stock['股票名称']
+                        
+                        tag = 'evenrow' if i % 2 == 0 else 'oddrow'
+                        
+                        if stock_code in analysis_dict:
+                            # 股票在分析结果中，显示完整的分析数据
+                            stock = analysis_dict[stock_code]
+                            
+                            # 计算大单买卖比
+                            ratio = "N/A"
+                            if stock['大卖单总金额'] > 0:
+                                ratio = f"{stock['大买单总金额'] / stock['大卖单总金额']:.2f}"
+                            elif stock['大买单总金额'] > 0:
+                                ratio = "∞"
+                            
+                            # 计算大单总额和大单净额
+                            total_amount = stock['大买单总金额'] + stock['大卖单总金额']
+                            net_amount = stock['大买单总金额'] - stock['大卖单总金额']
+                            
+                            # 插入主节点（股票汇总信息）
+                            main_item = tree.insert('', tk.END, values=(
+                                stock['股票代码'],
+                                stock['股票名称'],
+                                stock['大买单笔数'],
+                                f"{stock['大买单总手数']:,.0f}",
+                                f"{stock['大买单总金额']:,.0f}万元",
+                                stock['大卖单笔数'],
+                                f"{stock['大卖单总手数']:,.0f}",
+                                f"{stock['大卖单总金额']:,.0f}万元",
+                                f"{stock['总成交手数']:,.0f}",
+                                f"{total_amount:,.0f}万元",
+                                f"{net_amount:,.0f}万元",
+                                ratio
+                            ), tags=(tag, 'buy_amount', 'sell_amount'))
+                            
+                            # 插入子节点（详细买单）
+                            if stock['big_trades']['buys']:
+                                # 买单汇总节点
+                                buy_summary_item = tree.insert(main_item, tk.END, values=(
+                                    '', '买单详情', f"共{len(stock['big_trades']['buys'])}笔", '', '', '', '', '', '', '', '', ''
+                                ), tags=('buy_summary',))
+                                
+                                # 买单明细节点
+                                for trade in stock['big_trades']['buys']:
+                                    # 计算交易金额（万元）
+                                    trade_amount = (trade['Price'] * trade['Volume']) / 10000
+                                    tree.insert(buy_summary_item, tk.END, values=(
+                                        '', f"{trade['DealTime']}", f"手数: {trade['Volume_Hand']:.0f}", 
+                                        f"价格: {trade['Price']:.2f}", f"金额: {trade_amount:,.0f}万元", 
+                                        '', '', '', '', '', '', ''
+                                    ), tags=('trade_detail', 'buy_amount'))
+                            
+                            # 插入子节点（详细卖单）
+                            if stock['big_trades']['sells']:
+                                # 卖单汇总节点
+                                sell_summary_item = tree.insert(main_item, tk.END, values=(
+                                    '', '卖单详情', f"共{len(stock['big_trades']['sells'])}笔", '', '', '', '', '', '', '', '', ''
+                                ), tags=('sell_summary',))
+                                
+                                # 卖单明细节点
+                                for trade in stock['big_trades']['sells']:
+                                    # 计算交易金额（万元）
+                                    trade_amount = (trade['Price'] * trade['Volume']) / 10000
+                                    tree.insert(sell_summary_item, tk.END, values=(
+                                        '', f"{trade['DealTime']}", f"手数: {trade['Volume_Hand']:.0f}", 
+                                        f"价格: {trade['Price']:.2f}", f"金额: {trade_amount:,.0f}万元", 
+                                        '', '', '', '', '', '', ''
+                                    ), tags=('trade_detail', 'sell_amount'))
+                            
+                            # 设置主节点的交替行颜色
+                            tree.item(main_item, tags=(tag,))
+                        else:
+                            # 股票不在分析结果中，只显示基本信息
+                            tree.insert('', tk.END, values=(
+                                stock_code,
+                                stock_name,
+                                '', '', '', '', '', '', '', '', '', ''
+                            ), tags=(tag,))
+        except Exception as e:
+            self.update_status(f"⚠️ 更新自选股分析结果失败: {e}")
 
 
     def create_widgets(self):
@@ -1069,11 +1174,11 @@ class BigTradeUI:
     def display_results(self, results):
         """将结果显示在表格中，支持二级列表查看详细交易"""
         for market, tree in self.tables.items():
-            # 清空表格
-            for item in tree.get_children():
-                tree.delete(item)
-            
             if market in results:
+                # 清空表格，显示分析结果
+                for item in tree.get_children():
+                    tree.delete(item)
+                
                 for i, stock in enumerate(results[market]):
                     # 计算大单买卖比 (买入总金额 / 卖出总金额)
                     ratio = "N/A"
@@ -1141,18 +1246,11 @@ class BigTradeUI:
                     # 设置主节点的交替行颜色
                     tree.item(main_item, tags=(tag,))
                     
-                    # 获取当前主题的颜色配置
-                    theme = 'dark' if self.dark_mode else 'light'
-                    c = self.colors[theme]
-                    
-                    # 为大买单总金额和大卖单总金额列应用颜色
-                    # 注意：Treeview的标签是应用于整行的，我们需要创建一个自定义渲染方法来为单个单元格着色
-                    # 这里我们使用一个技巧：将大买单和大卖单金额分别放在不同的行中，或者使用自定义标签
-                    # 由于Treeview的限制，我们只能通过修改单元格的文本颜色来实现
-                    # 这里我们将使用tag_configure来设置颜色，并在insert时应用标签
-                    
                     # 重新配置tree的标签，确保颜色正确
                     self.refresh_tree_tags(tree)
+        
+        # 处理自选股表格，合并分析结果和自选股数据
+        self.update_portfolio_with_analysis(results)
 
 if __name__ == "__main__":
     import argparse
