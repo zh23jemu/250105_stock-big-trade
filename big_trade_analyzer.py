@@ -366,7 +366,7 @@ class BigTradeAnalyzer:
             return False
     
     def analyze_big_trades(self, buy_threshold, sell_threshold, buy_amount_threshold=0, sell_amount_threshold=0, 
-                          buy_logic='不选', sell_logic='不选', progress_callback=None):
+                          buy_logic='不考虑', sell_logic='不考虑', progress_callback=None):
         """分析大买卖单"""
         results = {}
         
@@ -395,7 +395,7 @@ class BigTradeAnalyzer:
                     buy_mask &= (df['Volume_Hand'] >= buy_threshold) & (df['Amount'] >= buy_amount_threshold)
                 elif buy_logic == '或or':
                     buy_mask &= ((df['Volume_Hand'] >= buy_threshold) | (df['Amount'] >= buy_amount_threshold))
-                elif buy_logic == '不选':
+                elif buy_logic == '不考虑':
                     buy_mask &= (df['Volume_Hand'] >= buy_threshold)
                 
                 big_buys = df[buy_mask]
@@ -407,7 +407,7 @@ class BigTradeAnalyzer:
                     sell_mask &= (df['Volume_Hand'] >= sell_threshold) & (df['Amount'] >= sell_amount_threshold)
                 elif sell_logic == '或or':
                     sell_mask &= ((df['Volume_Hand'] >= sell_threshold) | (df['Amount'] >= sell_amount_threshold))
-                elif sell_logic == '不选':
+                elif sell_logic == '不考虑':
                     sell_mask &= (df['Volume_Hand'] >= sell_threshold)
                 
                 big_sells = df[sell_mask]
@@ -829,9 +829,9 @@ class BigTradeUI:
         buy_amount_entry = ttk.Entry(grid_frame, textvariable=self.buy_amount_threshold, width=15)
         buy_amount_entry.grid(row=1, column=1, padx=10, pady=5)
         
-        ttk.Label(grid_frame, text="买入条件关系:").grid(row=2, column=0, padx=10, pady=5, sticky=tk.E)
-        self.buy_logic = tk.StringVar(value="不选")
-        buy_logic_combo = ttk.Combobox(grid_frame, textvariable=self.buy_logic, values=["不选", "与and", "或or"], width=13, state="readonly")
+        ttk.Label(grid_frame, text="考虑买入金额:").grid(row=2, column=0, padx=10, pady=5, sticky=tk.E)
+        self.buy_logic = tk.StringVar(value="不考虑")
+        buy_logic_combo = ttk.Combobox(grid_frame, textvariable=self.buy_logic, values=["不考虑", "与and", "或or"], width=13, state="readonly")
         buy_logic_combo.grid(row=2, column=1, padx=10, pady=5)
         
         # 卖出参数设置
@@ -845,9 +845,9 @@ class BigTradeUI:
         sell_amount_entry = ttk.Entry(grid_frame, textvariable=self.sell_amount_threshold, width=15)
         sell_amount_entry.grid(row=1, column=3, padx=10, pady=5)
         
-        ttk.Label(grid_frame, text="卖出条件关系:").grid(row=2, column=2, padx=10, pady=5, sticky=tk.E)
-        self.sell_logic = tk.StringVar(value="不选")
-        sell_logic_combo = ttk.Combobox(grid_frame, textvariable=self.sell_logic, values=["不选", "与and", "或or"], width=13, state="readonly")
+        ttk.Label(grid_frame, text="考虑卖出金额:").grid(row=2, column=2, padx=10, pady=5, sticky=tk.E)
+        self.sell_logic = tk.StringVar(value="不考虑")
+        sell_logic_combo = ttk.Combobox(grid_frame, textvariable=self.sell_logic, values=["不考虑", "与and", "或or"], width=13, state="readonly")
         sell_logic_combo.grid(row=2, column=3, padx=10, pady=5)
         
         self.analyze_btn = ttk.Button(grid_frame, text="🚀 开始扫描分析", command=self.analyze_data, style="Accent.TButton")
