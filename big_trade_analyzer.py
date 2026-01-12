@@ -425,79 +425,109 @@ class BigTradeAnalyzer:
                     progress = (processed_stocks / total_stocks) * 100
                     progress_callback(f"🔍 分析中: {market} - {stock_code} ({processed_stocks}/{total_stocks}, {progress:.1f}%)")
                 
-                # 计算每笔交易的金额
-                df['Amount'] = df['Price'] * df['Volume']
+                # 分析单只股票
+                stock_result = self.analyze_single_stock(stock_code, df, buy_threshold, sell_threshold, 
+                                                        buy_amount_threshold, sell_amount_threshold, 
+                                                        buy_logic, sell_logic)
                 
-                # 统计大买单（Side=0 表示主动买入）
-                buy_mask = (df['Side'] == 0)
-                
-                if buy_logic == '与and':
-                    buy_mask &= (df['Volume_Hand'] >= buy_threshold) & (df['Amount'] >= buy_amount_threshold)
-                elif buy_logic == '或or':
-                    buy_mask &= ((df['Volume_Hand'] >= buy_threshold) | (df['Amount'] >= buy_amount_threshold))
-                elif buy_logic == '不考虑':
-                    buy_mask &= (df['Volume_Hand'] >= buy_threshold)
-                
-                big_buys = df[buy_mask]
-                
-                # 统计大卖单（Side=1 表示主动卖出）
-                sell_mask = (df['Side'] == 1)
-                
-                if sell_logic == '与and':
-                    sell_mask &= (df['Volume_Hand'] >= sell_threshold) & (df['Amount'] >= sell_amount_threshold)
-                elif sell_logic == '或or':
-                    sell_mask &= ((df['Volume_Hand'] >= sell_threshold) | (df['Amount'] >= sell_amount_threshold))
-                elif sell_logic == '不考虑':
-                    sell_mask &= (df['Volume_Hand'] >= sell_threshold)
-                
-                big_sells = df[sell_mask]
-                
-                # 计算总成交手数
-                total_volume = df['Volume_Hand'].sum()
-                
-                # 计算大买单和大卖单的总手数
-                total_big_buy = big_buys['Volume_Hand'].sum()
-                total_big_sell = big_sells['Volume_Hand'].sum()
-                
-                # 计算大买单和大卖单的总金额（金额 = 价格 * 成交量）
-                # 注意：Volume是股数，1手=100股，所以总金额 = 价格 * Volume
-                # 转换为万元单位（保留两位小数）
-                total_big_buy_amount = (big_buys['Price'] * big_buys['Volume']).sum() / 10000
-                total_big_sell_amount = (big_sells['Price'] * big_sells['Volume']).sum() / 10000
-                
-                # 计算大买单和大卖单的笔数
-                count_big_buy = len(big_buys)
-                count_big_sell = len(big_sells)
-                
-                # 如果有大买单或大卖单，添加到结果中
-                if count_big_buy > 0 or count_big_sell > 0:
-                    # 获取股票名称，默认使用代码
-                    stock_name = self.get_stock_name(stock_code)
-                    
-                    # 保存详细的大单交易记录
-                    big_trades = {
-                        'buys': big_buys.to_dict('records'),
-                        'sells': big_sells.to_dict('records')
-                    }
-                    
-                    market_results.append({
-                        '股票代码': stock_code,
-                        '股票名称': stock_name,
-                        '大买单笔数': count_big_buy,
-                        '大买单总手数': round(total_big_buy, 2),
-                        '大买单总金额': round(total_big_buy_amount, 2),
-                        '大卖单笔数': count_big_sell,
-                        '大卖单总手数': round(total_big_sell, 2),
-                        '大卖单总金额': round(total_big_sell_amount, 2),
-                        '总成交手数': round(total_volume, 2),
-                        'big_trades': big_trades  # 保存详细的大单交易记录
-                    })
+                # 如果有分析结果，添加到市场结果中
+                if stock_result:
+                    market_results.append(stock_result)
             
             # 按大买单总手数降序排序
             market_results.sort(key=lambda x: (x['大买单总手数'], x['大卖单总手数']), reverse=True)
             results[market] = market_results
         
         return results
+    
+    def analyze_single_stock(self, stock_code, df=None, buy_threshold=None, sell_threshold=None, 
+                           buy_amount_threshold=0, sell_amount_threshold=0, 
+                           buy_logic='不考虑', sell_logic='不考虑'):
+        """单独分析一只股票的大买卖单"""
+        # 如果没有提供数据，尝试从已加载的数据中获取
+        if df is None:
+            # 尝试从stock_data中获取
+            if stock_code in self.stock_data:
+                df = self.stock_data[stock_code]
+            else:
+                # 尝试从market_data中获取
+                for market in self.market_data.values():
+                    if stock_code in market:
+                        df = market[stock_code]
+                        break
+                else:
+                    # 股票数据未加载
+                    return None
+        
+        # 计算每笔交易的金额
+        df['Amount'] = df['Price'] * df['Volume']
+        
+        # 统计大买单（Side=0 表示主动买入）
+        buy_mask = (df['Side'] == 0)
+        
+        if buy_logic == '与and':
+            buy_mask &= (df['Volume_Hand'] >= buy_threshold) & (df['Amount'] >= buy_amount_threshold)
+        elif buy_logic == '或or':
+            buy_mask &= ((df['Volume_Hand'] >= buy_threshold) | (df['Amount'] >= buy_amount_threshold))
+        elif buy_logic == '不考虑':
+            buy_mask &= (df['Volume_Hand'] >= buy_threshold)
+        
+        big_buys = df[buy_mask]
+        
+        # 统计大卖单（Side=1 表示主动卖出）
+        sell_mask = (df['Side'] == 1)
+        
+        if sell_logic == '与and':
+            sell_mask &= (df['Volume_Hand'] >= sell_threshold) & (df['Amount'] >= sell_amount_threshold)
+        elif sell_logic == '或or':
+            sell_mask &= ((df['Volume_Hand'] >= sell_threshold) | (df['Amount'] >= sell_amount_threshold))
+        elif sell_logic == '不考虑':
+            sell_mask &= (df['Volume_Hand'] >= sell_threshold)
+        
+        big_sells = df[sell_mask]
+        
+        # 计算总成交手数
+        total_volume = df['Volume_Hand'].sum()
+        
+        # 计算大买单和大卖单的总手数
+        total_big_buy = big_buys['Volume_Hand'].sum()
+        total_big_sell = big_sells['Volume_Hand'].sum()
+        
+        # 计算大买单和大卖单的总金额（金额 = 价格 * 成交量）
+        # 注意：Volume是股数，1手=100股，所以总金额 = 价格 * Volume
+        # 转换为万元单位（保留两位小数）
+        total_big_buy_amount = (big_buys['Price'] * big_buys['Volume']).sum() / 10000
+        total_big_sell_amount = (big_sells['Price'] * big_sells['Volume']).sum() / 10000
+        
+        # 计算大买单和大卖单的笔数
+        count_big_buy = len(big_buys)
+        count_big_sell = len(big_sells)
+        
+        # 只有当有大买单或大卖单时，才返回结果
+        if count_big_buy > 0 or count_big_sell > 0:
+            # 获取股票名称，默认使用代码
+            stock_name = self.get_stock_name(stock_code)
+            
+            # 保存详细的大单交易记录
+            big_trades = {
+                'buys': big_buys.to_dict('records'),
+                'sells': big_sells.to_dict('records')
+            }
+            
+            return {
+                '股票代码': stock_code,
+                '股票名称': stock_name,
+                '大买单笔数': count_big_buy,
+                '大买单总手数': round(total_big_buy, 2),
+                '大买单总金额': round(total_big_buy_amount, 2),
+                '大卖单笔数': count_big_sell,
+                '大卖单总手数': round(total_big_sell, 2),
+                '大卖单总金额': round(total_big_sell_amount, 2),
+                '总成交手数': round(total_volume, 2),
+                'big_trades': big_trades  # 保存详细的大单交易记录
+            }
+        else:
+            return None
 
 class BigTradeUI:
     def __init__(self, root, random_sample=0):
@@ -939,8 +969,44 @@ class BigTradeUI:
         # 更新状态
         self.update_status(f"✅ {message}" if success else f"⚠️ {message}")
         
-        # 刷新自选股显示
-        self.refresh_portfolio_display()
+        # 如果数据已加载，立即分析该股票的大单情况
+        if self.analyzer.is_loaded:
+            try:
+                # 获取当前的分析参数
+                buy_threshold = int(self.buy_threshold.get())
+                sell_threshold = int(self.sell_threshold.get())
+                buy_amount_threshold = float(self.buy_amount_threshold.get()) * 10000
+                sell_amount_threshold = float(self.sell_amount_threshold.get()) * 10000
+                buy_logic = self.buy_logic.get()
+                sell_logic = self.sell_logic.get()
+                
+                # 单独分析该股票
+                stock_result = self.analyzer.analyze_single_stock(
+                    self.selected_stock, None, buy_threshold, sell_threshold,
+                    buy_amount_threshold, sell_amount_threshold,
+                    buy_logic, sell_logic
+                )
+                
+                # 如果有分析结果，更新自选股标签页
+                if stock_result:
+                    # 构建包含该股票的临时结果字典
+                    temp_results = {}
+                    # 将结果添加到所有市场（确保在自选股分析中能找到）
+                    for market in self.analyzer.market_data:
+                        temp_results[market] = []
+                    temp_results['全部股票'] = [stock_result]
+                    
+                    # 更新自选股显示
+                    self.update_portfolio_with_analysis(temp_results)
+                else:
+                    # 刷新自选股显示（显示基本信息）
+                    self.refresh_portfolio_display()
+            except Exception as e:
+                # 如果分析出错，仅刷新显示基本信息
+                self.refresh_portfolio_display()
+        else:
+            # 刷新自选股显示（显示基本信息）
+            self.refresh_portfolio_display()
     
     def add_to_portfolio(self):
         """将股票添加到自选"""
@@ -957,8 +1023,44 @@ class BigTradeUI:
         # 更新状态
         self.update_status(f"✅ {message}" if success else f"⚠️ {message}")
         
-        # 刷新自选股显示
-        self.refresh_portfolio_display()
+        # 如果数据已加载，立即分析该股票的大单情况
+        if self.analyzer.is_loaded:
+            try:
+                # 获取当前的分析参数
+                buy_threshold = int(self.buy_threshold.get())
+                sell_threshold = int(self.sell_threshold.get())
+                buy_amount_threshold = float(self.buy_amount_threshold.get()) * 10000
+                sell_amount_threshold = float(self.sell_amount_threshold.get()) * 10000
+                buy_logic = self.buy_logic.get()
+                sell_logic = self.sell_logic.get()
+                
+                # 单独分析该股票
+                stock_result = self.analyzer.analyze_single_stock(
+                    self.selected_stock, None, buy_threshold, sell_threshold,
+                    buy_amount_threshold, sell_amount_threshold,
+                    buy_logic, sell_logic
+                )
+                
+                # 如果有分析结果，更新自选股标签页
+                if stock_result:
+                    # 构建包含该股票的临时结果字典
+                    temp_results = {}
+                    # 将结果添加到所有市场（确保在自选股分析中能找到）
+                    for market in self.analyzer.market_data:
+                        temp_results[market] = []
+                    temp_results['全部股票'] = [stock_result]
+                    
+                    # 更新自选股显示
+                    self.update_portfolio_with_analysis(temp_results)
+                else:
+                    # 刷新自选股显示（显示基本信息）
+                    self.refresh_portfolio_display()
+            except Exception as e:
+                # 如果分析出错，仅刷新显示基本信息
+                self.refresh_portfolio_display()
+        else:
+            # 刷新自选股显示（显示基本信息）
+            self.refresh_portfolio_display()
     
     def remove_from_portfolio(self):
         """从自选删除股票"""
