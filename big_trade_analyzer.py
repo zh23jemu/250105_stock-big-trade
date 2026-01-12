@@ -131,6 +131,46 @@ class BigTradeAnalyzer:
         
         return result
     
+    def add_stock_to_portfolio(self, portfolio_name, stock_code):
+        """将股票添加到自选股组"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # 确保代码是6位数字
+            stock_code = stock_code[-6:] if len(stock_code) > 6 else stock_code
+            
+            # 插入或忽略，如果已存在则不操作
+            cursor.execute('INSERT OR IGNORE INTO portfolios (portfolio_name, stock_code) VALUES (?, ?)', 
+                         (portfolio_name, stock_code))
+            
+            conn.commit()
+            conn.close()
+            
+            return True, f"成功将{stock_code}添加到{portfolio_name}"
+        except Exception as e:
+            return False, f"添加失败: {e}"
+    
+    def remove_stock_from_portfolio(self, portfolio_name, stock_code):
+        """从自选股组删除股票"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # 确保代码是6位数字
+            stock_code = stock_code[-6:] if len(stock_code) > 6 else stock_code
+            
+            # 删除指定股票
+            cursor.execute('DELETE FROM portfolios WHERE portfolio_name = ? AND stock_code = ?', 
+                         (portfolio_name, stock_code))
+            
+            conn.commit()
+            conn.close()
+            
+            return True, f"成功从{portfolio_name}删除{stock_code}"
+        except Exception as e:
+            return False, f"删除失败: {e}"
+    
     def load_data(self, progress_callback=None):
         """加载股票数据，支持按市场类型随机选取"""
         if not os.path.exists(self.data_dir):
@@ -868,6 +908,83 @@ class BigTradeUI:
                             ), tags=(tag,))
         except Exception as e:
             self.update_status(f"⚠️ 更新自选股分析结果失败: {e}")
+    
+    def show_context_menu(self, event, tree):
+        """显示右键菜单"""
+        # 获取当前选中的项
+        selected_item = tree.focus()
+        if not selected_item:
+            return
+        
+        # 获取股票代码
+        stock_code = tree.item(selected_item, 'values')[0]
+        if not stock_code:
+            return
+        
+        # 记录当前选中的表格和股票
+        self.current_tree = tree
+        self.selected_stock = stock_code
+        
+        # 显示右键菜单
+        self.context_menu.post(event.x_root, event.y_root)
+    
+    def add_to_specific_portfolio(self, portfolio_name):
+        """将股票添加到特定的自选股组"""
+        if not self.selected_stock:
+            return
+        
+        # 添加到自选股
+        success, message = self.analyzer.add_stock_to_portfolio(portfolio_name, self.selected_stock)
+        
+        # 更新状态
+        self.update_status(f"✅ {message}" if success else f"⚠️ {message}")
+        
+        # 刷新自选股显示
+        self.refresh_portfolio_display()
+    
+    def add_to_portfolio(self):
+        """将股票添加到自选"""
+        # 兼容旧的调用，默认使用当前选择的自选股组
+        if not self.selected_stock:
+            return
+        
+        # 获取选择的自选股组
+        portfolio_name = self.selected_portfolio.get()
+        
+        # 添加到自选股
+        success, message = self.analyzer.add_stock_to_portfolio(portfolio_name, self.selected_stock)
+        
+        # 更新状态
+        self.update_status(f"✅ {message}" if success else f"⚠️ {message}")
+        
+        # 刷新自选股显示
+        self.refresh_portfolio_display()
+    
+    def remove_from_portfolio(self):
+        """从自选删除股票"""
+        if not self.selected_stock:
+            return
+        
+        # 获取当前表格对应的市场名称
+        # 遍历所有表格，找到当前选中的表格
+        current_market = None
+        for market, tree in self.tables.items():
+            if tree == self.current_tree:
+                current_market = market
+                break
+        
+        # 只有在自选股标签页中才能删除
+        if current_market in ["自选1", "自选2", "自选3"]:
+            # 从自选股删除
+            success, message = self.analyzer.remove_stock_from_portfolio(current_market, self.selected_stock)
+            
+            # 更新状态
+            self.update_status(f"✅ {message}" if success else f"⚠️ {message}")
+            
+            # 刷新自选股显示
+            self.refresh_portfolio_display()
+        else:
+            self.update_status(f"⚠️ 请在自选股标签页中删除股票")
 
 
     def create_widgets(self):
@@ -1028,9 +1145,25 @@ class BigTradeUI:
             # 保存表格引用
             self.tables[market_name] = tree
             self.refresh_tree_tags(tree)
+            
+            # 为表格添加右键菜单支持
+            tree.bind("<Button-3>", lambda event, tree=tree: self.show_context_menu(event, tree))
         
         # 创建完所有表格后，加载自选股数据
         self.refresh_portfolio_display()
+        
+        # 创建右键菜单
+        self.context_menu = tk.Menu(self.root, tearoff=0)
+        # 添加到自选1, 2, 3的选项
+        self.context_menu.add_command(label="添加到自选1", command=lambda: self.add_to_specific_portfolio("自选1"))
+        self.context_menu.add_command(label="添加到自选2", command=lambda: self.add_to_specific_portfolio("自选2"))
+        self.context_menu.add_command(label="添加到自选3", command=lambda: self.add_to_specific_portfolio("自选3"))
+        self.context_menu.add_separator()
+        self.context_menu.add_command(label="从自选删除", command=self.remove_from_portfolio)
+        
+        # 记录当前选中的表格和股票
+        self.current_tree = None
+        self.selected_stock = None
 
     def sort_column(self, tree, col, reverse):
         """表格点击标题排序"""
