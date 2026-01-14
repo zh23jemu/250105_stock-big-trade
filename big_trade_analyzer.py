@@ -471,6 +471,8 @@ class BigTradeAnalyzer:
             buy_mask &= ((df['Volume_Hand'] >= buy_threshold) | (df['Amount'] >= buy_amount_threshold))
         elif buy_logic == '不考虑':
             buy_mask &= (df['Volume_Hand'] >= buy_threshold)
+        elif buy_logic == '只考虑':
+            buy_mask &= (df['Amount'] >= buy_amount_threshold)
         
         big_buys = df[buy_mask]
         
@@ -483,6 +485,8 @@ class BigTradeAnalyzer:
             sell_mask &= ((df['Volume_Hand'] >= sell_threshold) | (df['Amount'] >= sell_amount_threshold))
         elif sell_logic == '不考虑':
             sell_mask &= (df['Volume_Hand'] >= sell_threshold)
+        elif sell_logic == '只考虑':
+            sell_mask &= (df['Amount'] >= sell_amount_threshold)
         
         big_sells = df[sell_mask]
         
@@ -1155,7 +1159,7 @@ class BigTradeUI:
         
         ttk.Label(grid_frame, text="考虑买入金额:").grid(row=2, column=0, padx=10, pady=5, sticky=tk.E)
         self.buy_logic = tk.StringVar(value="不考虑")
-        buy_logic_combo = ttk.Combobox(grid_frame, textvariable=self.buy_logic, values=["不考虑", "与and", "或or"], width=13, state="readonly")
+        buy_logic_combo = ttk.Combobox(grid_frame, textvariable=self.buy_logic, values=["不考虑", "与and", "或or", "只考虑"], width=13, state="readonly")
         buy_logic_combo.grid(row=2, column=1, padx=10, pady=5)
         
         # 卖出参数设置
@@ -1171,7 +1175,7 @@ class BigTradeUI:
         
         ttk.Label(grid_frame, text="考虑卖出金额:").grid(row=2, column=2, padx=10, pady=5, sticky=tk.E)
         self.sell_logic = tk.StringVar(value="不考虑")
-        sell_logic_combo = ttk.Combobox(grid_frame, textvariable=self.sell_logic, values=["不考虑", "与and", "或or"], width=13, state="readonly")
+        sell_logic_combo = ttk.Combobox(grid_frame, textvariable=self.sell_logic, values=["不考虑", "与and", "或or", "只考虑"], width=13, state="readonly")
         sell_logic_combo.grid(row=2, column=3, padx=10, pady=5)
         
         self.analyze_btn = ttk.Button(grid_frame, text="🚀 开始扫描分析", command=self.analyze_data, style="Accent.TButton")
