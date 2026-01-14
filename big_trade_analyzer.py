@@ -669,6 +669,16 @@ class BigTradeUI:
                 "foreground": c['fg'],
                 "bordercolor": c['border'],
                 "relief": "flat"
+            },
+            "TCheckbutton": {
+                "background": c['bg'],
+                "foreground": c['fg'],
+                "padding": 5
+            },
+            "TRadiobutton": {
+                "background": c['bg'],
+                "foreground": c['fg'],
+                "padding": 5
             }
         }
 
@@ -695,6 +705,16 @@ class BigTradeUI:
         self.style.map("TEntry",
             bordercolor=[('focus', c['accent'])],
             lightcolor=[('focus', c['accent'])])
+
+        self.style.map("TCheckbutton",
+            background=[('active', c['bg'])],
+            foreground=[('active', c['accent'])],
+            indicatorcolor=[('selected', c['accent']), ('active', c['accent_hover'])])
+
+        self.style.map("TRadiobutton",
+            background=[('active', c['bg'])],
+            foreground=[('active', c['accent'])],
+            indicatorcolor=[('selected', c['accent']), ('active', c['accent_hover'])])
 
         # 更新标题和状态标签
         if hasattr(self, 'title_label'):
@@ -1092,6 +1112,32 @@ class BigTradeUI:
         else:
             self.update_status(f"⚠️ 请在自选股标签页中删除股票")
 
+    def on_check_toggle(self):
+        """根据勾选状态启用/禁用输入框并同步逻辑"""
+        # 更新输入框启用状态
+        self.buy_entry.config(state=tk.NORMAL if self.buy_type.get() else tk.DISABLED)
+        self.sell_entry.config(state=tk.NORMAL if self.sell_type.get() else tk.DISABLED)
+        self.buy_amount_entry.config(state=tk.NORMAL if self.buy_amt_type.get() else tk.DISABLED)
+        self.sell_amount_entry.config(state=tk.NORMAL if self.sell_amt_type.get() else tk.DISABLED)
+        
+        # 自动同步买入逻辑
+        if self.buy_type.get() and self.buy_amt_type.get():
+            if self.buy_logic.get() not in ["与and", "或or"]:
+                self.buy_logic.set("与and")
+        elif self.buy_type.get():
+            self.buy_logic.set("不考虑")
+        elif self.buy_amt_type.get():
+            self.buy_logic.set("只考虑")
+            
+        # 自动同步卖出逻辑
+        if self.sell_type.get() and self.sell_amt_type.get():
+            if self.sell_logic.get() not in ["与and", "或or"]:
+                self.sell_logic.set("与and")
+        elif self.sell_type.get():
+            self.sell_logic.set("不考虑")
+        elif self.sell_amt_type.get():
+            self.sell_logic.set("只考虑")
+
 
     def create_widgets(self):
         """创建UI组件"""
@@ -1143,43 +1189,58 @@ class BigTradeUI:
         params_frame = ttk.LabelFrame(top_panels, text="分析参数设置", padding="15")
         params_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
+        # 分析参数设置
         grid_frame = ttk.Frame(params_frame)
         grid_frame.pack(expand=True)
         
-        # 买入参数设置
-        ttk.Label(grid_frame, text="买入阈值 (手):").grid(row=0, column=0, padx=10, pady=5, sticky=tk.E)
+        # 定义模式变量
+        self.buy_type = tk.IntVar(value=1)
+        self.buy_amt_type = tk.IntVar(value=0)
+        self.sell_type = tk.IntVar(value=1)
+        self.sell_amt_type = tk.IntVar(value=0)
+
+        # Row 0: Buy Threshold & Sell Threshold
+        ttk.Checkbutton(grid_frame, variable=self.buy_type, command=self.on_check_toggle).grid(row=0, column=0, padx=(10, 0), pady=5)
+        ttk.Label(grid_frame, text="买入阈值 (手):").grid(row=0, column=1, padx=(0, 10), pady=5, sticky=tk.E)
         self.buy_threshold = tk.StringVar(value="5000")
-        buy_entry = ttk.Entry(grid_frame, textvariable=self.buy_threshold, width=15)
-        buy_entry.grid(row=0, column=1, padx=10, pady=5)
+        self.buy_entry = ttk.Entry(grid_frame, textvariable=self.buy_threshold, width=15)
+        self.buy_entry.grid(row=0, column=2, padx=10, pady=5)
         
-        ttk.Label(grid_frame, text="买入金额阈值 (万元):").grid(row=1, column=0, padx=10, pady=5, sticky=tk.E)
+        ttk.Checkbutton(grid_frame, variable=self.sell_type, command=self.on_check_toggle).grid(row=0, column=3, padx=(20, 0), pady=5)
+        ttk.Label(grid_frame, text="卖出阈值 (手):").grid(row=0, column=4, padx=(0, 10), pady=5, sticky=tk.E)
+        self.sell_threshold = tk.StringVar(value="5000")
+        self.sell_entry = ttk.Entry(grid_frame, textvariable=self.sell_threshold, width=15)
+        self.sell_entry.grid(row=0, column=5, padx=10, pady=5)
+        
+        # Row 1: Buy Amount & Sell Amount
+        ttk.Checkbutton(grid_frame, variable=self.buy_amt_type, command=self.on_check_toggle).grid(row=1, column=0, padx=(10, 0), pady=5)
+        ttk.Label(grid_frame, text="买入金额阈值 (万元):").grid(row=1, column=1, padx=(0, 10), pady=5, sticky=tk.E)
         self.buy_amount_threshold = tk.StringVar(value="0")
-        buy_amount_entry = ttk.Entry(grid_frame, textvariable=self.buy_amount_threshold, width=15)
-        buy_amount_entry.grid(row=1, column=1, padx=10, pady=5)
+        self.buy_amount_entry = ttk.Entry(grid_frame, textvariable=self.buy_amount_threshold, width=15)
+        self.buy_amount_entry.grid(row=1, column=2, padx=10, pady=5)
         
-        ttk.Label(grid_frame, text="考虑买入金额:").grid(row=2, column=0, padx=10, pady=5, sticky=tk.E)
+        ttk.Checkbutton(grid_frame, variable=self.sell_amt_type, command=self.on_check_toggle).grid(row=1, column=3, padx=(20, 0), pady=5)
+        ttk.Label(grid_frame, text="卖出金额阈值 (万元):").grid(row=1, column=4, padx=(0, 10), pady=5, sticky=tk.E)
+        self.sell_amount_threshold = tk.StringVar(value="0")
+        self.sell_amount_entry = ttk.Entry(grid_frame, textvariable=self.sell_amount_threshold, width=15)
+        self.sell_amount_entry.grid(row=1, column=5, padx=10, pady=5)
+        
+        # Row 2: Buy Logic & Sell Logic
+        ttk.Label(grid_frame, text="考虑买入金额:").grid(row=2, column=1, padx=(0, 10), pady=5, sticky=tk.E)
         self.buy_logic = tk.StringVar(value="不考虑")
         buy_logic_combo = ttk.Combobox(grid_frame, textvariable=self.buy_logic, values=["不考虑", "与and", "或or", "只考虑"], width=13, state="readonly")
-        buy_logic_combo.grid(row=2, column=1, padx=10, pady=5)
+        buy_logic_combo.grid(row=2, column=2, padx=10, pady=5)
         
-        # 卖出参数设置
-        ttk.Label(grid_frame, text="卖出阈值 (手):").grid(row=0, column=2, padx=10, pady=5, sticky=tk.E)
-        self.sell_threshold = tk.StringVar(value="5000")
-        sell_entry = ttk.Entry(grid_frame, textvariable=self.sell_threshold, width=15)
-        sell_entry.grid(row=0, column=3, padx=10, pady=5)
-        
-        ttk.Label(grid_frame, text="卖出金额阈值 (万元):").grid(row=1, column=2, padx=10, pady=5, sticky=tk.E)
-        self.sell_amount_threshold = tk.StringVar(value="0")
-        sell_amount_entry = ttk.Entry(grid_frame, textvariable=self.sell_amount_threshold, width=15)
-        sell_amount_entry.grid(row=1, column=3, padx=10, pady=5)
-        
-        ttk.Label(grid_frame, text="考虑卖出金额:").grid(row=2, column=2, padx=10, pady=5, sticky=tk.E)
+        ttk.Label(grid_frame, text="考虑卖出金额:").grid(row=2, column=4, padx=(0, 10), pady=5, sticky=tk.E)
         self.sell_logic = tk.StringVar(value="不考虑")
         sell_logic_combo = ttk.Combobox(grid_frame, textvariable=self.sell_logic, values=["不考虑", "与and", "或or", "只考虑"], width=13, state="readonly")
-        sell_logic_combo.grid(row=2, column=3, padx=10, pady=5)
+        sell_logic_combo.grid(row=2, column=5, padx=10, pady=5)
         
         self.analyze_btn = ttk.Button(grid_frame, text="🚀 开始扫描分析", command=self.analyze_data, style="Accent.TButton")
-        self.analyze_btn.grid(row=1, column=4, padx=20, pady=5, rowspan=2)
+        self.analyze_btn.grid(row=0, column=6, padx=20, pady=5, rowspan=3)
+        
+        # 初始化输入框的状态
+        self.on_check_toggle()
         
         # 自选股操作面板
         portfolio_frame = ttk.LabelFrame(top_panels, text="自选股操作", padding="15")
