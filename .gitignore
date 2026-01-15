@@ -7,3 +7,5 @@ __pycache__/
 *.txt
 *.exe
 build/*
+*.xls
+test_*.py

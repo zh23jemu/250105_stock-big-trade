@@ -80,14 +80,48 @@ class BigTradeAnalyzer:
         conn.close()
     
     def import_portfolio(self, portfolio_name, file_path):
-        """从txt文件导入自选股到数据库"""
+        """从xls文件导入自选股到数据库"""
         try:
-            # 读取txt文件，每一行是一个股票代码
-            with open(file_path, 'r', encoding='utf-8') as f:
-                stock_codes = [line.strip() for line in f if line.strip()]
+            # 检查文件扩展名，只允许xls格式
+            file_ext = os.path.splitext(file_path)[1].lower()
+            if file_ext != '.xls':
+                return False, "只支持.xls格式文件导入"
             
-            # 确保代码是6位数字
-            stock_codes = [code[-6:] if len(code) > 6 else code for code in stock_codes]
+            stock_codes = []
+            
+            # 读取文件，支持多种编码格式
+            encodings = ['utf-8', 'gbk', 'gb2312', 'ansi']
+            file_content = None
+            
+            for encoding in encodings:
+                try:
+                    with open(file_path, 'r', encoding=encoding) as f:
+                        file_content = f.readlines()
+                    break
+                except UnicodeDecodeError:
+                    continue
+            
+            if file_content is None:
+                return False, "无法识别文件编码"
+            
+            # 解析文件内容
+            for line in file_content:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                # 按制表符分割，取第一列作为股票代码
+                parts = line.split('\t')
+                if parts:
+                    stock_code = parts[0].strip()
+                    if stock_code:
+                        # 确保代码是6位数字
+                        stock_code = stock_code[-6:] if len(stock_code) > 6 else stock_code
+                        try:
+                            # 验证是否为数字代码
+                            int(stock_code)
+                            stock_codes.append(stock_code)
+                        except:
+                            continue
             
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -745,7 +779,7 @@ class BigTradeUI:
             from tkinter import filedialog
             file_path = filedialog.askopenfilename(
                 title="选择自选股文件",
-                filetypes=[("文本文件", "*.txt"), ("所有文件", "*.*")]
+                filetypes=[("Excel文件", "*.xls")]
             )
             
             if not file_path:
@@ -766,7 +800,7 @@ class BigTradeUI:
             self.update_status(f"⚠️ 导入失败: {e}")
     
     def export_portfolio(self):
-        """导出自选股到txt文件"""
+        """导出自选股到xls/txt文件（制表符分隔）"""
         try:
             # 获取选择的自选股组
             portfolio = self.selected_portfolio.get()
@@ -782,9 +816,9 @@ class BigTradeUI:
             from tkinter import filedialog
             file_path = filedialog.asksaveasfilename(
                 title="保存自选股文件",
-                defaultextension=".txt",
-                filetypes=[("文本文件", "*.txt"), ("所有文件", "*.*")],
-                initialfile=f"{portfolio}.txt"
+                defaultextension=".xls",
+                filetypes=[("Excel文件", "*.xls"), ("文本文件", "*.txt"), ("所有文件", "*.*")],
+                initialfile=f"{portfolio}_{datetime.now().strftime('%Y%m%d')}.xls"
             )
             
             if not file_path:
@@ -792,10 +826,12 @@ class BigTradeUI:
             
             self.update_status(f"📤 开始导出{portfolio}...")
             
-            # 将股票代码写入txt文件，一行一个
-            with open(file_path, 'w', encoding='utf-8') as f:
+            # 将股票代码和名称写入文件，使用制表符分隔，GBK编码兼容Excel
+            with open(file_path, 'w', encoding='gbk') as f:
+                # 写入标题行
+                f.write(f"股票代码\t股票名称\n")
                 for stock in stocks:
-                    f.write(f"{stock['股票代码']}\n")
+                    f.write(f"{stock['股票代码']}\t{stock['股票名称']}\n")
             
             self.update_status(f"✅ {portfolio}导出成功，共{len(stocks)}只股票")
         except Exception as e:
